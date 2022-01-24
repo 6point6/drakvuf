@@ -182,32 +182,13 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
      * 
      * 1. When NetUserGetInfo() is called, read memory
      *    address of (*bufptr) and store the value
-
      * 2. Read the memory address that points to (_USER_INFO_3)
-     * 
      * 3. Read the memory address that points to (usri3_name)
-     * 
-     * 4. Replace the original value with fake data
-     *
+     * 4. Replace the original usri3_name value with fake data
      * 5. Return the function with the modified buffer
      * 
-     */
-    
-    // Pause guest VM
-    //drakvuf_pause(drakvuf);
-    
-    // Stop drakvuf execution (https://github.com/tklengyel/drakvuf/issues/1110)
-    //drakvuf_interrupt(drakvuf, 22);
-
-    // Store all the arguments passed by the function
-    std::vector<uint64_t> temp_args = ret_target->arguments;
-    
-    // Loop through vector and print each argument
-    //for(std::size_t i = 0; i < temp_args.size(); ++i) {
-    //    std::cout << temp_args[i] << "\n";
-    //}
-    
-    /**
+     * Windows functions
+     * 
      *  NET_API_STATUS NET_API_FUNCTION NetUserGetInfo(
      *       [in]  LPCWSTR servername,
      *       [in]  LPCWSTR username,
@@ -221,99 +202,57 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
      *      DWORD  usri3_password_age;
      *      ...
      */
-    
-    // Print the address of the 4th arg
-    std::cout << "[*bufptr]: 0x" << std::hex << temp_args[3] << "\n";
 
-    //int some_addr = temp_args[3];
-    vmi_pid_t curr_pid = ret_target->pid;
-    
-    // Store address of bufptr
-    addr_t bufptr = temp_args[3];
-    // Store address of User_Info_3 struct
-    uint64_t pUserInfo_3 = 0;
-    // Store address of Usri3_name struct
-    uint64_t pUsri3_name = 0;
-
-    // Initiate access to vmi
-    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-    //vmi_instance_t vmi = drakvuf->vmi;
-
-    //ACCESS_CONTEXT(ctx,
-    //    .translate_mechanism = VMI_TM_PROCESS_PID,
-    //    .addr = bufptr,
-    //    .pid = curr_pid
-    //);
-    // other test
-    //some_addr = drakvuf_read_addr(drakvuf, info, &ctx, &info->regs->rdx);
-    
-    // Read address at pointer (arg3)
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3))
+    // Only modify specific functions
+    if (!strcmp(info->trap->name, "NetUserGetInfo"))
     {
-        std::cout << "Error occured 1" << "\n";
+        std::cout << "Hit NetUserGetInfo function" << "\n";
+
+        // Store all the arguments passed by the function
+        std::vector<uint64_t> temp_args = ret_target->arguments;
+
+        // Print the address of the 4th arg
+        std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
+
+        //int some_addr = temp_args[3];
+        vmi_pid_t curr_pid = ret_target->pid;
+        
+        // Store address of bufptr
+        addr_t bufptr = temp_args[3];
+        // Store address of User_Info_3 struct
+        uint64_t pUserInfo_3 = 0;
+        // Store address of Usri3_name struct
+        uint64_t pUsri3_name = 0;
+
+        // Initiate access to vmi
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+        
+        // Read address at pointer (arg3)
+        if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3))
+        {
+            std::cout << "Error occured 1" << "\n";
+        }
+
+        // Print address of pUserInfo_3
+        std::cout << "pUserInfo_3: 0x" << std::hex << pUserInfo_3 << "\n";
+
+        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)pUserInfo_3, curr_pid, &pUsri3_name))
+        {
+            std::cout << "Error occured 2" << "\n";
+        }
+        // Print address of pointer to usri3_name
+        std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n";
+
+        // ASCII character 'J' or 4a in hex
+        uint8_t letter = 74;
+
+        // Change the first letter of username 
+        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &letter))
+        {
+            std::cout << "Write 8 bits to vaddress failed!" << "\n";
+        }
+
     }
-
-    // Print address of pUserInfo_3
-    std::cout << "pUserInfo_3: 0x" << std::hex << pUserInfo_3 << "\n";
-
-    if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)pUserInfo_3, curr_pid, &pUsri3_name))
-    {
-        std::cout << "Error occured 2" << "\n";
-    }
-    // Print address of pointer to usri3_name
-    std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n";
-
-    /*
-    Print Unicode String of username
-    unicode_string_t * username_str = vmi_read_unicode_str_va(vmi, (addr_t)pUsri3_name, curr_pid);
-    if (NULL == username_str)
-    {
-        std::cout << "Unicode String read failed" << "\n";
-    }
-
-    std::wcout << L"Username: " << username_str << std::endl;
-    */
-
-    // Set a static ASCII character 'J' or 4a
-    uint8_t letter = 74;
-
-    // Change the first letter of username 
-    if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &letter))
-    {
-        std::cout << "Write 8 bits to vaddress failed!" << "\n";
-    }
-
-    //ACCESS_CONTEXT(ctx,
-    //    .translate_mechanism = VMI_TM_PROCESS_PID,
-    //    .addr = (addr_t)pUsri3_name,
-    //    .pid = curr_pid
-    //);
-
-    // Read unicode string
-    // unicode_string_t* tmp = drakvuf_read_unicode_common(drakvuf, &ctx);
-    //tmp = vmi_read_unicode_str_va(vmi, (addr_t)pUsri3_name, curr_pid);
-    //tmp = vmi_read_unicode_str(vmi, &ctx);
-
-    // PRINT_DEBUG("User: %s at 0x%lx\n", tmp->contents, (addr_t)pUsri3_name); SEG fault
-
-    //if (tmp)
-    //    vmi_free_unicode_str(tmp);
-
-    //if ((tmp = drakvuf_read_unicode(drakvuf, info, (addr_t)pUsri3_name)))
-    //    std::cout << "[testy] \n";
-
-    //unicode_string_t* usri3_name_us = drakvuf_read_unicode(drakvuf, info, (addr_t)pUsri3_name);
-
-    //std::cout << "[Test 2] " << usri3_name->contents << "\n";
-    //char const* usri3_name = usri3_name_us ? reinterpret_cast<char const*>(usri3_name_us->contents) : "";
-    //std::cout << "[Test 2] " << usri3_name << "\n";
-
-    //if (usri3_name_us)
-    //    vmi_free_unicode_str(usri3_name_us);
-
-    //unicode_string_t* username = vmi_read_unicode_str_va(vmi, (addr_t)tmp_buf_p2, curr_pid);
-    //std::cout << "[Test 3] " << username->length << "\n";
-
     ////////////////////////////////// END
     drakvuf_remove_trap(drakvuf, info->trap, (drakvuf_trap_free_t)free_trap);
     return VMI_EVENT_RESPONSE_NONE;
