@@ -38,6 +38,24 @@ can be used to monitor the execution of arbitrary binaries.
 If you would like a full-featured DRAKVUF GUI to setup as automated analysis sandbox, check out the
 [DRAKVUF Sandbox project](https://github.com/CERT-Polska/drakvuf-sandbox).
 
+## APIMON plugin
+The `apimon` plugin has been modified to update a struct named `usri3_name` whenever the `NetUserGetInfo` function is called ([Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/api/lmaccess/nf-lmaccess-netusergetinfo)). This function is related to the `net user USERNAME` command, found on Windows systems since XP.
+
+The `--dll-hooks-list` option must supplied with a file should look exactly like this:
+```log
+samcli.dll,NetUserGetInfo,log,lpcwstr,lpcwstr,dword,lpbyte
+```
+
+To run Drakvuf with the apimon plugin, type (a few extra options have been added to limit output):
+```bash
+sudo ./drakvuf -a apimon -d win10-dev -r /root/windows10-pro-21h1.json \
+ --dll-hooks-list /home/tester/guests/dll-hooks-test.txt \
+ --memdump-disable-free-vm --memdump-disable-protect-vm \
+ --memdump-disable-write-vm --memdump-disable-terminate-proc \
+ --memdump-disable-create-thread --memdump-disable-set-thread \
+ --disable-sysret -o json
+```
+
 -------
 
 More information can be found on the project website: https://drakvuf.com
