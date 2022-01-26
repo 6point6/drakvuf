@@ -41,10 +41,15 @@ If you would like a full-featured DRAKVUF GUI to setup as automated analysis san
 ## APIMON plugin
 The `apimon` plugin has been modified to update a struct named `usri3_name` whenever the `NetUserGetInfo` function is called ([Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/api/lmaccess/nf-lmaccess-netusergetinfo)). This function is related to the `net user USERNAME` command, found on Windows systems since XP.
 
-The `--dll-hooks-list` option must supplied with a file should look exactly like this:
+It also supports hooking the `IPHLPAPI.DLL!IcmpSendEcho2Ex` function which is used by application such as `ping.exe`. All it does is pauses the VM for 3 seconds and resumes.
+
+The `--dll-hooks-list` option must supplied with a file should look exactly like this: (**DLLs names are case-sensitive!**)
 ```log
 samcli.dll,NetUserGetInfo,log,lpcwstr,lpcwstr,dword,lpbyte
+IPHLPAPI.DLL,IcmpSendEcho2Ex,log,handle,handle,pio_apc_routine,pvoid,srcipaddr,dstipaddr,lpvoid,word,pip_option_information,lpvoid,dword,dword
 ```
+
+To help with identifying the right symbols and DLLs, you can use a combination of [WinDBG](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debugger-download-tools) and [winpdb](https://lise.pnfsoftware.com/winpdb/).
 
 To run Drakvuf with the apimon plugin, type (a few extra options have been added to limit output):
 ```bash
