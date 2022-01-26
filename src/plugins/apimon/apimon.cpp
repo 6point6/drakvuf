@@ -243,13 +243,23 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
         // Print address of pointer to usri3_name
         std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n";
 
-        // ASCII character 'J' or 4a in hex
-        uint8_t letter = 74;
-
-        // Change the first letter of username 
-        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &letter))
+        if (temp_args[2] == 3)
         {
-            std::cout << "Write 8 bits to vaddress failed!" << "\n";
+            std::cout << "Found: USER_INFO_3 struct!" << "\n";
+            // ASCII character 'J' or 4a in hex
+            uint8_t letter = 74;
+
+            // Change the first letter of username 
+            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &letter))
+            {
+                std::cout << "Write 8 bits to vaddress failed!" << "\n";
+            }
+            
+        } else if (temp_args[2] == 2)
+        {
+            std::cout << "Found: USER_INFO_2 struct!" << "\n";
+        } else {
+            std::cout << "Unsupported USER_INFO_X struct!" << "\n";
         }
 
     }
