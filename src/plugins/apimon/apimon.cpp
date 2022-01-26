@@ -263,6 +263,19 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
         }
 
     }
+
+    // Pause the guest for 3 seconds when ping.exe is called
+    if (!strcmp(info->trap->name, "IcmpSendEcho2Ex"))
+    {
+        std::cout << "Hit IcmpSendEcho2Ex function!" << "\n";
+        std::cout << "Pausing guest..." << "\n";
+        // pause and resume guest after 3 seconds
+        drakvuf_pause(drakvuf);
+        sleep(3);
+        drakvuf_resume(drakvuf);
+        std::cout << "Resuming guest..." << "\n";
+    }
+    
     ////////////////////////////////// END
     drakvuf_remove_trap(drakvuf, info->trap, (drakvuf_trap_free_t)free_trap);
     return VMI_EVENT_RESPONSE_NONE;
