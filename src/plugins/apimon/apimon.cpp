@@ -247,13 +247,23 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
         {
             std::cout << "Found: USER_INFO_3 struct!" << "\n";
             // ASCII character 'J' or 4a in hex
-            uint8_t letter = 74;
+            //uint8_t letter = 74;
 
-            // Change the first letter of username 
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &letter))
+            // Replace Tester with Batman
+            // Batman = 42 00 61 00 74 00 6d 00 61 00 6e 00
+            uint8_t fake_user[12] = {66, 0, 97, 0, 116, 0, 109, 0, 97, 0, 110, 0};
+
+            for (uint8_t byte : fake_user)
             {
-                std::cout << "Write 8 bits to vaddress failed!" << "\n";
+                if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &byte))
+                {
+                    std::cout << "Writing to mem failed!" << "\n";
+                    // add a break on failure
+                }
+                pUsri3_name++; // move address 1 byte
             }
+
+            std::cout << "Replaced username with 'Batman' !" << "\n";
             
         } else if (temp_args[2] == 2)
         {
