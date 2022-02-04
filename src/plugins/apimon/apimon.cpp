@@ -264,18 +264,16 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
 
     }
 
-    // Pause the guest for 3 seconds when ping.exe is called
+    // Pause the guest for 3 seconds
     if (!strcmp(info->trap->name, "IcmpSendEcho2Ex"))
     {
         std::cout << "Hit IcmpSendEcho2Ex function!" << "\n";
         std::cout << "Pausing guest..." << "\n";
-        // pause and resume guest after 3 seconds
         drakvuf_pause(drakvuf);
         sleep(3);
         drakvuf_resume(drakvuf);
         std::cout << "Resuming guest..." << "\n";
     }
-    
     ////////////////////////////////// END
     drakvuf_remove_trap(drakvuf, info->trap, (drakvuf_trap_free_t)free_trap);
     return VMI_EVENT_RESPONSE_NONE;
@@ -292,6 +290,39 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
     vmi_v2pcache_flush(vmi, info->regs->cr3);
 
     addr_t ret_addr = drakvuf_get_function_return_address(drakvuf, info);
+
+    // Fake Privilege escalation by changing the SID 
+    // of the LookupAccountSidW function. Only works
+    // with the whoami.exe /user command.
+    if (!strcmp(info->trap->name, "LookupAccountSidW"))
+    {
+        std::cout << "Hit LookupAccountSidW function!" << "\n";
+        
+        // Get PID of process
+        vmi_pid_t curr_pid = info->attached_proc_data.pid;
+
+        // Get address of PSID
+        addr_t pSID = info->regs->rdx;
+        // Replace current user SID with system
+        uint8_t fake_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0};
+
+        // REAL System user SID
+        // 01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00
+        
+        // Modify input argument 2
+        for (uint8_t byte : fake_SID)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID, curr_pid, &byte))
+            {
+                std::cout << "Writing to mem failed!" << "\n";
+                // add a break on failure
+            }
+            pSID++; // move address 1 byte
+        }
+
+    }
+    
+    ////////////// END /////////////
 
     if (!ret_addr)
     {
