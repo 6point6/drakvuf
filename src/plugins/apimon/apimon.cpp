@@ -246,8 +246,6 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
         if (temp_args[2] == 3)
         {
             std::cout << "Found: USER_INFO_3 struct!" << "\n";
-            // ASCII character 'J' or 4a in hex
-            //uint8_t letter = 74;
 
             // Replace Tester with Batman
             // Batman = 42 00 61 00 74 00 6d 00 61 00 6e 00
@@ -284,6 +282,74 @@ static event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_
         drakvuf_resume(drakvuf);
         std::cout << "Resuming guest..." << "\n";
     }
+
+    // Manipulate HTTPS file downloads by hooking the
+    // ncrypt.dll!SslDecryptPacket function. Only 
+    // tested with powershell Invoke-WebRequestcmd
+    if (!strcmp(info->trap->name, "SslDecryptPacket"))
+    {
+        std::cout << "Hit SslDecryptPacket function!" << "\n";
+
+        // Initiate access to vmi
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+        
+        // Store all the arguments passed by the function
+        std::vector<uint64_t> temp_args = ret_target->arguments;
+
+        // Get PID of process
+        vmi_pid_t curr_pid = info->attached_proc_data.pid;
+
+        // Address of 5th arg (A pointer to a buffer to contain the decrypted packet)
+        addr_t pbOutput = temp_args[4]; // OUT
+        std::cout << "pbOutput: 0x" << std::hex << pbOutput << "\n";
+
+        // Address of 6th arg (The length, bytes, of the pbOutput buffer)
+        addr_t cbOutput = (uint32_t)temp_args[5]; // IN GET LOWER PART OF 64 addr
+        std::cout << "Len of pOutput: " << cbOutput << "\n";
+
+        uint64_t decrypted_data_p = 0;
+        //uint64_t decrypted_data = 0;
+        //uint32_t decrypted_data_len = 0;
+
+        drakvuf_pause(drakvuf);
+
+        // Get address of decrypted_data
+        if (VMI_FAILURE == vmi_read_64_va(vmi, pbOutput, curr_pid, &decrypted_data_p))
+        {
+            std::cout << "Error reading pbOutput!" << "\n";
+        }
+
+        // Print actual decrypted_data content
+        std::cout << "decrypted_data: 0x"  << decrypted_data_p << "\n";
+
+        // only supports small TEXT files
+
+        // Replace 10 bytes in the buffer with "__________"
+        uint8_t poc_string[10] = {95,95,95,95,95,95,95,95,95,95};
+
+        // TODO
+        // Search for a double CRLF pattern which
+        // marks the end of the fields section of
+        // a message.
+        //uint8_t pattern[4] = { 13, 10, 13, 10 };
+
+        addr_t pBuffer_http_body = pbOutput + (cbOutput - 31);
+
+        // Modify decrypted HTTPS buffer 
+         for (uint8_t byte : poc_string)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pBuffer_http_body, curr_pid, &byte))
+            {
+                std::cout << "Writing to mem failed!" << "\n";
+                // add a break on failure
+            }
+            pBuffer_http_body++; // move address 1 byte
+        } 
+
+        drakvuf_resume(drakvuf);
+
+    }
+
     ////////////////////////////////// END
     drakvuf_remove_trap(drakvuf, info->trap, (drakvuf_trap_free_t)free_trap);
     return VMI_EVENT_RESPONSE_NONE;
