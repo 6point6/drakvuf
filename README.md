@@ -39,26 +39,55 @@ If you would like a full-featured DRAKVUF GUI to setup as automated analysis san
 [DRAKVUF Sandbox project](https://github.com/CERT-Polska/drakvuf-sandbox).
 
 ## APIMON plugin
-The `apimon` plugin has been modified to update a struct named `usri3_name` whenever the `NetUserGetInfo` function is called ([Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/api/lmaccess/nf-lmaccess-netusergetinfo)). This function is related to the `net user USERNAME` command, found on Windows systems since XP.
+This plugin has been modified to manipulate the behaviour of Windows systems by hooking into specific user mode calls.
 
-It also supports hooking the `IPHLPAPI.DLL!IcmpSendEcho2Ex` function which is used by application such as `ping.exe`. All it does is pauses the VM for 3 seconds and resumes.
+* Modify the response of `net user USERNAME` command.
+* Modify the reponse of `whoami` command.
+* Pause guest VM when a `ping` request is sent.
+* Modify the response of `Invoke-WebRequest` when a HTTPS request sent.
 
-The `--dll-hooks-list` option must supplied with a file should look exactly like this: (**DLLs names are case-sensitive!**)
-```log
-samcli.dll,NetUserGetInfo,log,lpcwstr,lpcwstr,dword,lpbyte
-IPHLPAPI.DLL,IcmpSendEcho2Ex,log,handle,handle,pio_apc_routine,pvoid,srcipaddr,dstipaddr,lpvoid,word,pip_option_information,lpvoid,dword,dword
-```
+The `--dll-hooks-list` option must supplied: (**NOTE: DLL names are case-sensitive!**). Use the following links to help with identifying the right symbols and DLLs, [WinDBG](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debugger-download-tools) and [winpdb](https://lise.pnfsoftware.com/winpdb/).
 
-To help with identifying the right symbols and DLLs, you can use a combination of [WinDBG](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debugger-download-tools) and [winpdb](https://lise.pnfsoftware.com/winpdb/).
-
-To run Drakvuf with the apimon plugin, type (a few extra options have been added to limit output):
+To run Drakvuf with modified apimon plugin, type:
 ```bash
 sudo ./drakvuf -a apimon -d win10-dev -r /root/windows10-pro-21h1.json \
  --dll-hooks-list /home/tester/guests/dll-hooks-test.txt \
- --memdump-disable-free-vm --memdump-disable-protect-vm \
- --memdump-disable-write-vm --memdump-disable-terminate-proc \
- --memdump-disable-create-thread --memdump-disable-set-thread \
- --disable-sysret -o json
+ -o json
+```
+
+### Hooking NetUserGetInfo
+The `NetUserGetInfo` function uses the `samcli.dll` module. The hook modifies a struct named `usri3_name` whenever the `NetUserGetInfo` function is called ([Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/api/lmaccess/nf-lmaccess-netusergetinfo)). This function is related to the `net user USERNAME` command, found on most Windows systems since XP.
+
+Use the following DLL signature:
+```log
+samcli.dll,NetUserGetInfo,log,lpcwstr,lpcwstr,dword,lpbyte
+```
+
+### Hooking LookupAccountSidW
+The `LookupAccountSidW` function uses the `advapi32.dll` module. This is used whenever the `whoami.exe` command is executed. This hook simply modifies the **second entry argument**, resulting in NT System user SID returned.
+
+Use the following DLL signature:
+```log
+advapi32.dll,LookupAccountSidW,log,lpcwstr,psid,lpwstr,lpdword,lpwstr,lpdword,psid_name_use
+```
+
+### Hooking IcmpSendEcho2Ex
+The `IcmpSendEcho2Ex` function uses the `IPHLPAPI.DLL` module. It is used by many applications such as `ping.exe`. All code does is pauses the VM for 3 seconds and resumes.
+
+Use the following DLL signature:
+```log
+IPHLPAPI.DLL,IcmpSendEcho2Ex,log,handle,handle,pio_apc_routine,pvoid,srcipaddr,dstipaddr,lpvoid,word,pip_option_information,lpvoid,dword,dword
+```
+
+### Hooking TlsDecryptPacket
+The `TlsDecryptPacket` function uses the `ncrypt.dll` module. The hook works by obtaining the memory address of the decrypted buffer (5th argument) of `TlsDecryptPacket` and replaces 10 bytes and returns. To activate the request simply use Powershell and the cmdlet `Invoke-WebRequest` with a **HTTPS** URI. For example:
+```bash
+Invoke-WebRequest -Uri "https://example.com/file.txt" -OutFile "C:\path\file.txt"
+```
+
+Use the following DLL signature:
+```log
+ncrypt.dll,SslDecryptPacket,log,NCRYPT_PROV_HANDLE,NCRYPT_KEY_HANDLE,PBYTE,DWORD,PBYTE,DWORD,DWORD,ULONGLONG,DWORD
 ```
 
 -------
