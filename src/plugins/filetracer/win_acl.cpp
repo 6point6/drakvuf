@@ -117,6 +117,7 @@ using std::setfill;
 using std::setw;
 using std::string;
 using std::stringstream;
+using namespace filetracer_ns;
 
 namespace
 {
@@ -543,7 +544,7 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
             break;
 
         case OUTPUT_KV:
-            fmt << base_name << ':' << ace_count;
+            fmt << base_name << '=' << ace_count;
             break;
 
         case OUTPUT_JSON:
@@ -557,7 +558,8 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
             break;
     }
 
-    while (ace_ptr < aces.get() + aces_size)
+    size_t aces_read = 0;
+    while (ace_ptr < aces.get() + aces_size && aces_read < ace_count)
     {
         auto header = reinterpret_cast<const struct ACE_HEADER*>(ace_ptr);
         auto ace_size = static_cast<size_t>(header->size);
@@ -603,7 +605,10 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
                 break;
 
             case OUTPUT_KV:
-                fmt << ",Type=\"" << type << "\"," << hex << showbase << mask << ",SID=\"" << sid << '"';
+                fmt << ",Type=\"" << type << "\"";
+                if (!mask.empty())
+                    fmt << "," << hex << showbase << mask;
+                fmt << ",SID=\"" << sid << '"';
                 break;
 
             case OUTPUT_JSON:
@@ -625,6 +630,7 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
         }
 
         ace_ptr += ace_size;
+        aces_read += 1;
     }
 
     // manual work done, may arise issues

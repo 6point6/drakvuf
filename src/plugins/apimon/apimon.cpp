@@ -102,15 +102,10 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <config.h>
 #include <iostream>
 #include <stdexcept>
-#include <glib.h>
 #include <inttypes.h>
-#include <libvmi/libvmi.h>
-#include <libvmi/peparse.h>
 #include <assert.h>
-#include <libdrakvuf/json-util.h>
 
 #include "plugins/output_format.h"
 #include "apimon.h"
@@ -470,7 +465,7 @@ static void print_addresses(drakvuf_t drakvuf, apimon* plugin, const dll_view_t*
     json_object* j_root;
     json_object* j_rvas;
     vmi_pid_t pid;
-    vmi_lock_guard lg(drakvuf);
+    auto vmi = vmi_lock_guard(drakvuf);
 
     dll_name = drakvuf_read_unicode_va(drakvuf, dll->mmvad.file_name_ptr, 0);
 
@@ -480,7 +475,7 @@ static void print_addresses(drakvuf_t drakvuf, apimon* plugin, const dll_view_t*
     if (!dll_name || !dll_name->contents)
         goto out;
 
-    vmi_dtb_to_pid(lg.vmi, dll->dtb, &pid);
+    vmi_dtb_to_pid(vmi, dll->dtb, &pid);
 
     j_root = json_object_new_object();
     j_rvas = json_object_new_object();

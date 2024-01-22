@@ -106,8 +106,8 @@ bin_PROGRAMS = drakvuf injector proc_stat
 
 SUBDIRS = xen_helper libdrakvuf libinjector plugins dirwatch libusermode libhook helpers/hiddump
 
-drakvuf_SOURCES = main.cpp drakvuf.cpp drakvuf.h exitcodes.h filesystem.hpp
-injector_SOURCES = injector.c
+drakvuf_SOURCES = main.cpp drakvuf.cpp drakvuf.h exitcodes.h
+injector_SOURCES = injector.cpp
 proc_stat_SOURCES = proc_stat.cpp
 
 AM_CPPFLAGS = $(CPPFLAGS)
@@ -136,6 +136,10 @@ if SANITIZE
 AM_CFLAGS += $(SANITIZE_CFLAGS)
 AM_CXXFLAGS += $(SANITIZE_CFLAGS)
 AM_LDFLAGS += $(SANITIZE_LDFLAGS)
+endif
+
+if !OUTPUT_BUFFERING
+AM_CXXFLAGS += -DDISABLE_OUTPUT_BUFFERING
 endif
 
 # Note that -pg is incompatible with HARDENING

@@ -115,7 +115,6 @@ namespace jsonfmt
 template <class T>
 constexpr bool print_data(std::ostream& os, const T& data, char sep);
 
-
 template <class T, class = void>
 class DataPrinter
 {
@@ -170,6 +169,24 @@ public:
     }
 
     template <class Tv = T>
+    static bool print(std::ostream& os, const fmt::Estr<Tv>& data, char)
+    {
+        gchar* escaped = drakvuf_escape_str(data.value.c_str());
+        os << escaped;
+        g_free(escaped);
+        return true;
+    }
+
+    template <class Tv = T>
+    static bool print(std::ostream& os, const fmt::BinaryString<Tv>& data, char)
+    {
+        os << "\"";
+        data.format(os);
+        os << "\"";
+        return true;
+    }
+
+    template <class Tv = T>
     static bool print(std::ostream& os, const std::function<bool(std::ostream&)>& printer, char)
     {
         auto pos = os.tellp();
@@ -206,6 +223,11 @@ public:
         }
         os.seekp(pos);
         return false;
+    }
+
+    static bool print(std::ostream& os, const flagsval& flags, char sep)
+    {
+        return print_data(os, keyval(flags.name, fmt::Rstr(flags.values)), sep);
     }
 
     template <class... Ts>
@@ -279,6 +301,11 @@ private:
         if (!printed)
             os.seekp(pos);
         return printed;
+    }
+
+    static bool print_data(std::ostream& os, const flagsval& flags, char sep)
+    {
+        return print_data(os, keyval(flags.name, fmt::Rstr(flags.values)), sep);
     }
 
     template <class Tv, class... Ts>

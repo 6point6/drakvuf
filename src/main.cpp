@@ -110,34 +110,41 @@
 #include <inttypes.h>
 #include <string.h>
 #include <unistd.h>
-#include <glib.h>
 #include <exception>
 #include <memory>
-
+#include <filesystem>
 #include <map>
+#include <set>
+#include <vector>
 
-#include "filesystem.hpp"
 #include "drakvuf.h"
 #include "exitcodes.h"
 
+static int is_interrupted = 0;
 static std::unique_ptr<drakvuf_c> drakvuf;
 
-void close_handler(int signal)
+static void close_handler(int signal)
 {
-    drakvuf->interrupt(signal);
+    is_interrupted = signal;
+    if (drakvuf) drakvuf->interrupt(signal);
 }
 
-void timeout_handler(int signal)
+static void timeout_handler(int signal)
 {
     (void)signal;
-    drakvuf->interrupt(SIGDRAKVUFTIMEOUT);
+    close_handler(SIGDRAKVUFTIMEOUT);
 }
 
-static inline bool disable_plugin(char* optarg, bool* plugin_list)
+static void clear_interrupt()
+{
+    close_handler(0); // clear
+}
+
+static inline bool disable_plugin(char* _optarg, bool* plugin_list)
 {
     for (int i=0; i<__DRAKVUF_PLUGIN_LIST_MAX; i++)
     {
-        if (!strcmp(optarg, drakvuf_plugin_names[i]))
+        if (!strcmp(_optarg, drakvuf_plugin_names[i]))
         {
             plugin_list[i] = false;
             return true;
@@ -153,7 +160,7 @@ static inline void disable_all_plugins(bool* plugin_list)
         plugin_list[i] = false;
 }
 
-static inline bool enable_plugin(char* optarg, bool* plugin_list, bool* disabled_all)
+static inline bool enable_plugin(char* _optarg, bool* plugin_list, bool* disabled_all)
 {
     if (!*disabled_all)
     {
@@ -162,7 +169,7 @@ static inline bool enable_plugin(char* optarg, bool* plugin_list, bool* disabled
     }
     for (int i = 0; i < __DRAKVUF_PLUGIN_LIST_MAX; i++)
     {
-        if (!strcmp(optarg, drakvuf_plugin_names[i]))
+        if (!strcmp(_optarg, drakvuf_plugin_names[i]))
         {
             plugin_list[i] = true;
             return true;
@@ -184,9 +191,10 @@ static void print_usage()
         "\t -I <injection thread>     The ThreadID in the process to hijack for injection (requires -i)\n"
         "\t -e <injection_cmd>        The executable to start with injection\n"
         "\t -c <current_working_dir>  The current working directory for injected executable\n"
+        "\t --exit-injection-thread   Exit injection thread after process injection complete\n"
         "\t -m <inject_method>        The injection method: [WIN]  : createproc, shellexec, shellcode, doppelganging\n"
         "\t                                               : [LINUX]: execproc -> execlp(), linuxshellcode \n"
-        "\t --write-file <src> <dst>  [WIN] Copy host file <src> into running VM's path <dst> (writefile injection method)\n"
+        "\t --write-file <src> <dst>  Copy host file <src> into running VM's path <dst> (writefile injection method)\n"
         "\t                           Can be used multiple times to copy multiple files\n"
         "\t --write-file-timeout <seconds>\n"
         "\t                           write-file timeout (in seconds, default: 0 == no timeout, requires --write-file)\n"
@@ -206,10 +214,15 @@ static void print_usage()
         "\t                           Wait for plugins to stop before termination loop\n"
         "\t -a <plugin>               Activate the specified plugin\n"
         "\t -p                        Leave domain paused after DRAKVUF exits\n"
-        "\t -F                        Enable fast singlestepping (requires Xen 4.14+)\n"
+        "\t -F, --fast-singlestep     Enable fast singlestepping (requires Xen 4.14+)\n"
         "\t --traps-ttl <ttl value>   Maximum number of times trap can be triggered in 10sec period. Protects against api hammering.\n"
-#ifdef ENABLE_PLUGIN_FILEDELETE
+        "\t --ignore-pid <PID>        Ignore events from process with PID (can be repeated multiple times).\n"
+        "\t --enable-active-callback-check\n"
+        "\t                           The check prevents events processing until function call injection finish.\n"
+#if defined(ENABLE_PLUGIN_FILEDELETE) || defined(ENABLE_PLUGIN_FILEEXTRACTOR)
         "\t -D <file dump folder>     Folder where extracted files should be stored at\n"
+#endif
+#ifdef ENABLE_PLUGIN_FILEDELETE
         "\t -M                        Dump new or modified files also (requires -D)\n"
         "\t -n                        Use extraction method based on function injection (requires -D)\n"
 #endif
@@ -230,6 +243,10 @@ static void print_usage()
 #endif
 #ifdef ENABLE_PLUGIN_BSODMON
         "\t -b                        Exit from execution as soon as a BSoD is detected\n"
+        "\t --bsodmon-ignore-stop\n"
+        "\t                           Prevent bsodmon from stopping with other plugins\n"
+        "\t --crashdump-dir <directory>\n"
+        "\t                           Where to store OS crash dumps\n"
 #endif
         "\t -w, --json-wow <path to json>\n"
         "\t                           The JSON profile for WoW64 NTDLL\n"
@@ -286,6 +303,8 @@ static void print_usage()
         "\t                           Stop printing addresses of string arguments in apimon and memdump\n"
 #endif
 #if defined(ENABLE_PLUGIN_PROCDUMP) || defined(ENABLE_PLUGIN_PROCDUMP2)
+        "\t --procdump-timeout <timeout>\n"
+        "\t                           Timeout (in seconds) to finish process memory dumps\n"
         "\t --procdump-dir <directory>\n"
         "\t                           Where to store processes dumps\n"
         "\t --compress-procdumps\n"
@@ -296,6 +315,8 @@ static void print_usage()
 #ifdef ENABLE_PLUGIN_PROCDUMP2
         "\t --procdump-disable-dump-on-finish\n"
         "\t                           Disable dumping of injected process memory upon completion of monitoring\n"
+        "\t --procdump-new-processes-on-finish\n"
+        "\t                           Dump memory for all new processes upon completion of monitoring\n"
         "\t --procdump-disable-kideliverapc-hook\n"
         "\t                           Disables hook on KiDeliverApc\n"
         "\t --procdump-disable-kedelayexecutionthread-hook\n"
@@ -342,11 +363,25 @@ static void print_usage()
         "\t                           The JSON profile for fwpkclnt.sys\n"
         "\t --json-fltmgr <path to json>\n"
         "\t                           The JSON profile for fltmgr.sys\n"
+        "\t --json-ci <path to json>\n"
+        "\t                           The JSON profile for ci.dll\n"
 #endif
 #ifdef ENABLE_PLUGIN_CALLBACKMON
         "\t --json-netio <path to json>\n"
         "\t                           The JSON profile for netio.sys\n"
+        "\t --json-ndis <path to json>\n"
+        "\t                           The JSON profile for ndis.sys\n"
 #endif
+#ifdef ENABLE_PLUGIN_DKOMMON
+        "\t --json-services <path to json>\n"
+        "\t                           The JSON profile for services.exe\n"
+#endif
+#ifdef ENABLE_PLUGIN_UNIXSOCKETMON
+        "\t --unixsocketmon-max-size-print <size>\n"
+        "\t                           Max message size (in bytes) to print\n"
+#endif
+        "\t --libdrakvuf-not-get-userid\n"
+        "\t                           Don't collect user id in get process data\n"
         "\t -h, --help                Show this help\n"
     );
 }
@@ -358,6 +393,7 @@ int main(int argc, char** argv)
     uint64_t limited_traps_ttl = UNLIMITED_TTL;
     char const* injection_cmd = nullptr;
     char const* injection_cwd = nullptr;
+    bool exit_injection_thread = false;
     std::map<std::filesystem::path, std::filesystem::path> write_files;
     injection_method_t injection_method = INJECT_METHOD_CREATEPROC;
     int injection_timeout = 0;
@@ -374,7 +410,6 @@ int main(int argc, char** argv)
     bool plugin_list[] = {[0 ... __DRAKVUF_PLUGIN_LIST_MAX-1] = 1};
     bool wait_stop_plugins = false;
     int wait_stop_plugins_timeout = 0;
-    bool verbose = false;
     bool leave_paused = false;
     bool libvmi_conf = false;
     bool fast_singlestep = false;
@@ -382,13 +417,19 @@ int main(int argc, char** argv)
     auto terminated_processes = std::make_shared<std::unordered_map<vmi_pid_t, bool>>();
     plugins_options options = { .terminated_processes = terminated_processes };
     bool disabled_all = false; // Used to disable all plugin once
-    const char* args[10] = {};
-    int args_count = 0;
+    std::vector<const char*> args;
     bool terminate = false;
     int termination_timeout = 20;
     bool context_based_interception = false;
     GSList* context_processes = NULL;
     bool procdump_on_finish = true;
+    bool libdrakvuf_get_userid = true;
+    std::set<uint64_t> ignored_processes;
+    bool enable_active_callback_check = false;
+
+#ifdef ENABLE_PLUGIN_BSODMON
+    bool bsodmon_ignore_stop = false;
+#endif
 
     eprint_current_time();
 
@@ -402,7 +443,6 @@ int main(int argc, char** argv)
         return drakvuf_exit_code_t::FAIL;
     }
 
-    int long_index = 0;
     enum
     {
         opt_json_sspicli = 1000,
@@ -424,9 +464,11 @@ int main(int argc, char** argv)
         opt_memdump_disable_set_thread,
         opt_memdump_disable_shellcode_detect,
         opt_dll_hooks_list,
+        opt_procdump_timeout,
         opt_procdump_dir,
         opt_compress_procdumps,
         opt_procdump_disable_dump_on_finish,
+        opt_procdump_new_processes_on_finish,
         opt_procdump_disable_kideliverapc_hook,
         opt_procdump_disable_kedelayexecutionthread_hook,
         opt_json_clr,
@@ -457,8 +499,18 @@ int main(int argc, char** argv)
         opt_hidsim_random_clicks,
         opt_rootkitmon_json_fwpkclnt,
         opt_rootkitmon_json_fltmgr,
+        opt_rootkitmon_json_ci,
+        opt_dkommon_json_services,
         opt_callbackmon_json_netio,
-        opt_json_hal
+        opt_callbackmon_json_ndis,
+        opt_json_hal,
+        opt_libdrakvuf_not_get_userid,
+        opt_ignore_pid,
+        opt_bsodmon_ignore_stop,
+        opt_crashdump_dir,
+        opt_enable_active_callback_check,
+        opt_exit_injection_thread,
+        opt_unixsocketmon_max_size,
     };
     const option long_opts[] =
     {
@@ -490,9 +542,11 @@ int main(int argc, char** argv)
         {"memdump-disable-set-thread", no_argument, NULL, opt_memdump_disable_set_thread},
         {"memdump-disable-shellcode-detect", no_argument, NULL, opt_memdump_disable_shellcode_detect},
         {"dll-hooks-list", required_argument, NULL, opt_dll_hooks_list},
+        {"procdump-timeout", required_argument, NULL, opt_procdump_timeout},
         {"procdump-dir", required_argument, NULL, opt_procdump_dir},
         {"compress-procdumps", no_argument, NULL, opt_compress_procdumps},
         {"procdump-disable-dump-on-finish", no_argument, NULL, opt_procdump_disable_dump_on_finish},
+        {"procdump-new-processes-on-finish", no_argument, NULL, opt_procdump_new_processes_on_finish},
         {"procdump-disable-kideliverapc-hook", no_argument, NULL, opt_procdump_disable_kideliverapc_hook},
         {"procdump-disable-kedelayexecutionthread-hook", no_argument, NULL, opt_procdump_disable_kedelayexecutionthread_hook},
         {"json-clr", required_argument, NULL, opt_json_clr},
@@ -524,12 +578,23 @@ int main(int argc, char** argv)
         {"hid-random-clicks", no_argument, NULL, opt_hidsim_random_clicks},
         {"json-fwpkclnt", required_argument, NULL, opt_rootkitmon_json_fwpkclnt},
         {"json-fltmgr", required_argument, NULL, opt_rootkitmon_json_fltmgr},
+        {"json-ci", required_argument, NULL, opt_rootkitmon_json_ci},
         {"json-netio", required_argument, NULL, opt_callbackmon_json_netio},
+        {"json-ndis", required_argument, NULL, opt_callbackmon_json_ndis},
+        {"json-services", required_argument, NULL, opt_dkommon_json_services},
         {"json-hal", required_argument, NULL, opt_json_hal},
+        {"libdrakvuf-not-get-userid", no_argument, NULL, opt_libdrakvuf_not_get_userid},
+        {"ignore-pid", required_argument, NULL, opt_ignore_pid},
+        {"bsodmon-ignore-stop", no_argument, NULL, opt_bsodmon_ignore_stop},
+        {"crashdump-dir", required_argument, NULL, opt_crashdump_dir},
+        {"enable-active-callback-check", no_argument, NULL, opt_enable_active_callback_check},
+        {"exit-injection-thread", no_argument, NULL, opt_exit_injection_thread},
+        {"unixsocketmon-max-size-print", required_argument, NULL, opt_unixsocketmon_max_size},
         {NULL, 0, NULL, 0}
     };
-    const char* opts = "r:d:i:I:e:m:t:D:o:vx:a:f:spT:S:Mc:nblgj:k:w:W:hF:C";
+    const char* opts = "r:d:i:I:e:m:t:D:o:vx:a:f:spT:S:Mc:nblgj:k:w:W:hFC";
 
+    int long_index = 0;
     while ((c = getopt_long (argc, argv, opts, long_opts, &long_index)) != -1)
         switch (c)
         {
@@ -550,6 +615,9 @@ int main(int argc, char** argv)
                 break;
             case 'c':
                 injection_cwd = optarg;
+                break;
+            case opt_exit_injection_thread:
+                exit_injection_thread = true;
                 break;
             case 'g':
                 injection_global_search = true;
@@ -630,8 +698,7 @@ int main(int argc, char** argv)
                 }
                 break;
             case 'f':
-                args[args_count] = optarg;
-                args_count++;
+                args.push_back(optarg);
                 break;
             case 's':
                 options.cpuid_stealth = true;
@@ -658,15 +725,25 @@ int main(int argc, char** argv)
                 options.disable_sysret = true;
                 break;
 #endif
+#ifdef ENABLE_PLUGIN_FILEDELETE
             case 'M':
                 options.dump_modified_files = true;
                 break;
             case 'n':
                 options.filedelete_use_injector = true;
                 break;
+#endif
+#ifdef ENABLE_PLUGIN_BSODMON
             case 'b':
                 options.abort_on_bsod = true;
                 break;
+            case opt_bsodmon_ignore_stop:
+                bsodmon_ignore_stop = true;
+                break;
+            case opt_crashdump_dir:
+                options.crashdump_dir = optarg;
+                break;
+#endif
             case 'l':
                 libvmi_conf = true;
                 break;
@@ -706,6 +783,12 @@ int main(int argc, char** argv)
             case opt_userhook_no_addr:
                 options.userhook_no_addr = true;
                 break;
+            case opt_ignore_pid:
+            {
+                auto pid = strtoull(optarg, NULL, 0);
+                ignored_processes.insert(pid);
+                break;
+            }
 #ifdef ENABLE_PLUGIN_WMIMON
             case opt_json_ole32:
                 options.ole32_profile = optarg;
@@ -753,6 +836,9 @@ int main(int argc, char** argv)
                 break;
 #endif
 #if defined(ENABLE_PLUGIN_PROCDUMP) || defined(ENABLE_PLUGIN_PROCDUMP2)
+            case opt_procdump_timeout:
+                options.procdump_timeout = strtoul(optarg, NULL, 0);
+                break;
             case opt_procdump_dir:
                 options.procdump_dir = optarg;
                 break;
@@ -766,6 +852,9 @@ int main(int argc, char** argv)
 #ifdef ENABLE_PLUGIN_PROCDUMP2
             case opt_procdump_disable_dump_on_finish:
                 procdump_on_finish = false;
+                break;
+            case opt_procdump_new_processes_on_finish:
+                options.procdump_new_processes_on_finish = true;
                 break;
             case opt_procdump_disable_kideliverapc_hook:
                 options.procdump_disable_kideliverapc_hook = true;
@@ -836,16 +925,37 @@ int main(int argc, char** argv)
             case opt_rootkitmon_json_fltmgr:
                 options.fltmgr_profile = optarg;
                 break;
+            case opt_rootkitmon_json_ci:
+                options.ci_profile = optarg;
+                break;
 #endif
 #ifdef ENABLE_PLUGIN_CALLBACKMON
             case opt_callbackmon_json_netio:
                 options.netio_profile = optarg;
                 break;
+            case opt_callbackmon_json_ndis:
+                options.ndis_profile = optarg;
+                break;
 #endif
-
+#ifdef ENABLE_PLUGIN_DKOMMON
+            case opt_dkommon_json_services:
+                options.services_profile = optarg;
+                break;
+#endif
+#ifdef ENABLE_PLUGIN_UNIXSOCKETMON
+            case opt_unixsocketmon_max_size:
+                options.unixsocketmon_max_size = strtoull(optarg, NULL, 0);
+                break;
+#endif
             case 'h':
                 print_usage();
                 return drakvuf_exit_code_t::SUCCESS;
+            case opt_libdrakvuf_not_get_userid:
+                libdrakvuf_get_userid = false;
+                break;
+            case opt_enable_active_callback_check:
+                enable_active_callback_check = true;
+                break;
             default:
                 if (isalnum(c))
                     fprintf(stderr, "Unrecognized option: %c\n", c);
@@ -866,20 +976,6 @@ int main(int argc, char** argv)
         return drakvuf_exit_code_t::FAIL;
     }
 
-    PRINT_DEBUG("Starting DRAKVUF initialization\n");
-
-    try
-    {
-        drakvuf = std::make_unique<drakvuf_c>(domain, json_kernel_path, json_wow_path, output, verbose, leave_paused, libvmi_conf, kpgd, fast_singlestep, limited_traps_ttl);
-    }
-    catch (const std::exception& e)
-    {
-        fprintf(stderr, "Failed to initialize DRAKVUF: %s\n", e.what());
-        return drakvuf_exit_code_t::FAIL;
-    }
-
-    PRINT_DEBUG("DRAKVUF initializated\n");
-
     /* for a clean exit */
     struct sigaction act;
     act.sa_handler = close_handler;
@@ -894,6 +990,33 @@ int main(int argc, char** argv)
     act_timer.sa_flags = 0;
     sigemptyset(&act_timer.sa_mask);
     sigaction(SIGALRM, &act_timer, nullptr);
+
+    PRINT_DEBUG("Starting DRAKVUF initialization\n");
+
+    try
+    {
+        drakvuf = std::make_unique<drakvuf_c>(
+                domain,
+                json_kernel_path,
+                json_wow_path,
+                output,
+                leave_paused,
+                libvmi_conf,
+                kpgd,
+                fast_singlestep,
+                limited_traps_ttl,
+                ignored_processes,
+                libdrakvuf_get_userid,
+                enable_active_callback_check
+            );
+    }
+    catch (const std::exception& e)
+    {
+        fprintf(stderr, "Failed to initialize DRAKVUF: %s\n", e.what());
+        return drakvuf_exit_code_t::FAIL;
+    }
+
+    PRINT_DEBUG("DRAKVUF initializated\n");
 
     for (const auto&[src, dst] : write_files)
     {
@@ -911,14 +1034,29 @@ int main(int argc, char** argv)
                 return drakvuf_exit_code_t::WRITE_FILE_ERROR;
         }
 
-        drakvuf->interrupt(0); // clear
+        if (is_interrupted)
+            return drakvuf_exit_code_t::SUCCESS;
+        clear_interrupt();
     }
 
     vmi_pid_t injected_pid = 0;
     if (injection_cmd)
     {
         PRINT_DEBUG("Starting injection with PID %i(%i) for %s\n", injection_pid, injection_thread, injection_cmd);
-        injector_status_t ret = drakvuf->inject_cmd(injection_pid, injection_thread, injection_cmd, injection_cwd, injection_method, binary_path, target_process, injection_timeout, injection_global_search, args_count, args, &injected_pid);
+        injector_status_t ret = drakvuf->inject_cmd(
+                injection_pid,
+                injection_thread,
+                injection_cmd,
+                injection_cwd,
+                injection_method,
+                binary_path,
+                target_process,
+                injection_timeout,
+                injection_global_search,
+                args.size(),
+                args.data(),
+                &injected_pid
+            );
         switch (ret)
         {
             case INJECTOR_FAILED_WITH_ERROR_CODE:
@@ -931,7 +1069,12 @@ int main(int argc, char** argv)
                 return drakvuf_exit_code_t::INJECTION_TIMEOUT;
         }
 
-        drakvuf->interrupt(0); // clear
+        if (exit_injection_thread)
+            drakvuf->exit_thread(injection_pid, injection_thread);
+
+        if (is_interrupted)
+            return drakvuf_exit_code_t::SUCCESS;
+        clear_interrupt();
     }
     if (procdump_on_finish)
         options.procdump_on_finish = injected_pid;
@@ -961,22 +1104,33 @@ int main(int argc, char** argv)
             break;
     }
 
-    PRINT_DEBUG("Beginning stop plugins\n");
-
-    bool plugins_pending = false;
-    int rc = drakvuf->stop_plugins(plugin_list);
-    if (rc < 0)
-        return drakvuf_exit_code_t::FAIL;
-    else if (rc > 0)
-        plugins_pending = true;
-
-    if (plugins_pending && wait_stop_plugins)
-        drakvuf->plugin_stop_loop(wait_stop_plugins_timeout, plugin_list);
-
-    PRINT_DEBUG("Finished stop plugins\n");
+    if (is_interrupted != SIGINT)
+        return drakvuf_exit_code_t::SUCCESS;
+    clear_interrupt();
 
     if (terminate && injected_pid)
         drakvuf->terminate(injection_pid, injection_thread, injected_pid, termination_timeout, terminated_processes);
 
-    return drakvuf_exit_code_t::SUCCESS;
+    PRINT_DEBUG("Beginning stop plugins\n");
+
+#ifdef ENABLE_PLUGIN_BSODMON
+    if (bsodmon_ignore_stop)
+        plugin_list[PLUGIN_BSODMON] = false;
+#endif
+
+    int rc = drakvuf->stop_plugins(plugin_list);
+    if (rc < 0)
+        return drakvuf_exit_code_t::FAIL;
+    else if (rc == 0)
+        return drakvuf_exit_code_t::SUCCESS;
+
+    if (wait_stop_plugins)
+        drakvuf->plugin_stop_loop(wait_stop_plugins_timeout, plugin_list);
+
+    PRINT_DEBUG("Finished stop plugins\n");
+
+    if (SIGDRAKVUFTIMEOUT == drakvuf->is_interrupted())
+        return drakvuf_exit_code_t::PLUGINS_STOP_TIMEOUT;
+    else
+        return drakvuf_exit_code_t::SUCCESS;
 }

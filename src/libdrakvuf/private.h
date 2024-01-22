@@ -107,7 +107,10 @@
 
 /******************************************/
 
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -123,32 +126,13 @@
 
 #include <sys/poll.h>
 
-#ifndef PRINT_DEBUG
-#ifdef DRAKVUF_DEBUG
-extern bool verbose;
-
-#define PRINT_DEBUG(...) \
-    do { \
-        if(verbose) { \
-            eprint_current_time(); \
-            fprintf (stderr, __VA_ARGS__); \
-        }\
-    } while (0)
-
-#else
-#define PRINT_DEBUG(...) \
-    do {} while(0)
-
-#endif // DRAKVUF_DEBUG
-#endif // PRINT_DEBUG
-
-#define UNUSED(x) (void)(x)
-
 #if GLIB_CHECK_VERSION(2,67,3)
 #define g_memdup_compat(x,y) g_memdup2(x,y)
 #else
 #define g_memdup_compat(x,y) g_memdup(x,y)
 #endif
+
+#define LIBDRAKVUF_PRIVATE_GUARD
 
 /*
  * How often should the VMI caches be flushed?
@@ -192,6 +176,7 @@ struct drakvuf
     char* json_wow_path;
     json_object* json_wow;
     bool libvmi_conf;
+    bool get_userid;
 
     xen_interface_t* xen;
     os_interface_t osi;
@@ -208,6 +193,7 @@ struct drakvuf
     vmi_instance_t vmi;
 
     vmi_event_t cr3_event;
+    vmi_event_t cr4_event;
     vmi_event_t interrupt_event;
     vmi_event_t mem_event;
     vmi_event_t debug_event;
@@ -220,6 +206,10 @@ struct drakvuf
     bitfield_t bitfields;
 
     size_t* wow_offsets;
+
+    // Cache for extracted linux kernel version
+    kernel_version_t kernel_ver;
+    bool kernel_ver_initialized;
 
     // Processing trap removals in trap callbacks
     // is problematic so we save all such requests
@@ -259,6 +249,9 @@ struct drakvuf
     bool enable_cr3_based_interception;
     GSList* context_switch_intercept_processes;
 
+    // list of processes to be ignored
+    GSList* ignored_processes;
+
     GSList* event_fd_info;     // the list of registered event FDs
     struct pollfd* event_fds;  // auto-generated pollfd for poll()
     int event_fd_cnt;          // auto-generated for poll()
@@ -270,6 +263,16 @@ struct drakvuf
     ipt_state_t ipt_state[MAX_DRAKVUF_VCPU];
 
     int64_t limited_traps_ttl;
+
+    /* This field is used to delay registers modification on injections.
+     * This fixes two issues:
+     * 1. Two plug-ins injects function call or modify registers.
+     * 2. One plug-in injects function call and other one reads modified registers.
+     */
+    bool vmi_response_set_registers[MAX_DRAKVUF_VCPU];
+    x86_registers_t regs_modified[MAX_DRAKVUF_VCPU];
+    GHashTable* injections_in_progress; // key: <pid:tid>
+    bool enable_active_callback_check;
 };
 
 struct breakpoint
@@ -360,5 +363,7 @@ char* drakvuf_get_current_process_name(drakvuf_t drakvuf,
 
 int64_t drakvuf_get_current_process_userid(drakvuf_t drakvuf,
     drakvuf_trap_info_t* info);
+
+bool drakvuf_is_ignored_process(drakvuf_t drakvuf, vmi_pid_t pid);
 
 #endif

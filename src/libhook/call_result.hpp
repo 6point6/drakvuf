@@ -105,7 +105,6 @@
 
 #include <libdrakvuf/libdrakvuf.h>
 #include <libhook/hooks/base.hpp>
-#include <libhook/private.h>
 
 namespace libhook
 {
@@ -123,6 +122,7 @@ struct CallResult
         target_pid = info->attached_proc_data.pid;
         target_tid = info->attached_proc_data.tid;
         target_rsp = info->regs->rsp;
+
     }
 
     bool verifyResultCallParams(drakvuf_t drakvuf, drakvuf_trap_info_t* info)

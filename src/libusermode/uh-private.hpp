@@ -145,8 +145,12 @@ struct rh_data_t
     // Additional data. Stored here for optimalization.
     target_hook_state state;
     vmi_pid_t target_process_pid;
+    uint32_t target_process_tid;
+    uint64_t target_process_rsp;
     addr_t target_process_dtb;
     addr_t func_addr;
+    x86_registers_t regs;
+    bool inject_in_progress{false};
 
     // We need to pass this around as we need offsets.
     userhook* userhook_plugin;
@@ -180,6 +184,28 @@ struct dll_t
     // internal, for page faults
     addr_t pf_current_addr;
     addr_t pf_max_addr;
+
+    bool in_progress{false};
+    x86_registers_t regs;
+
+    uint64_t stack_marker()
+    {
+        // TODO Set initial random value and print this to log
+        return 0x1aef05de1aef05de;
+    }
+
+    uint64_t* set_stack_marker()
+    {
+        m_stack_marker = stack_marker();
+        return &m_stack_marker;
+    }
+
+    uint64_t stack_marker_va()
+    {
+        return m_stack_marker;
+    }
+
+    uint64_t m_stack_marker;
 };
 
 struct map_view_of_section_result_t : public call_result_t
@@ -205,6 +231,7 @@ class userhook : public pluginex
 {
 public:
     drakvuf_t m_drakvuf = nullptr;
+    addr_t copy_virt_mem_va{0};
 
     userhook(userhook const&) = delete;
     userhook& operator=(userhook const&) = delete;
@@ -215,7 +242,9 @@ public:
     // map pid -> list of hooked dlls
     std::map<vmi_pid_t, std::vector<dll_t>> loaded_dlls;
 
+#ifndef LIBUSERMODE_USE_INJECTION
     std::set<std::pair<vmi_pid_t, uint32_t /*thread_id*/>> pf_in_progress;
+#endif
 
     static userhook& get_instance(drakvuf_t drakvuf)
     {
@@ -244,5 +273,21 @@ private:
     std::vector<drakvuf_trap_t*> running_rh_traps;
 };
 
+proc_data_t get_proc_data(drakvuf_t drakvuf, const drakvuf_trap_info_t* info);
+bool make_trap(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info* info, hook_target_entry_t* target, addr_t exec_func);
+event_response_t hook_dll(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t base_address_ptr);
+bool is_pagetable_loaded(vmi_instance_t vmi, const drakvuf_trap_info* info, addr_t vaddr);
+event_response_t internal_perform_hooking(drakvuf_t drakvuf, drakvuf_trap_info* info, userhook* plugin, dll_t* dll_meta);
+
+#ifdef LIBUSERMODE_USE_INJECTION
+bool inject_copy_memory(userhook* plugin, drakvuf_t drakvuf,
+    drakvuf_trap_info_t* info,
+    event_response_t (*cb)(drakvuf_t, drakvuf_trap_info_t*),
+    uint64_t* stack_marker,
+    addr_t addr,
+    addr_t* stack_pointer);
+#else
+event_response_t system_service_handler_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
+#endif
 
 #endif

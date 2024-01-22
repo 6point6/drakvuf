@@ -220,6 +220,26 @@ addr_t win_get_current_thread(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     return thread;
 }
 
+addr_t win_get_rspbase(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
+{
+    vmi_instance_t vmi = drakvuf->vmi;
+    addr_t rspbase = 0;
+    addr_t prcb = 0;
+    addr_t kpcr = 0;
+
+    if (!win_get_current_kpcr(drakvuf, info, &kpcr, &prcb))
+    {
+        return 0;
+    }
+
+    if (VMI_SUCCESS != vmi_read_addr_va(vmi, kpcr + prcb + drakvuf->offsets[KPRCB_RSPBASE], 0, &rspbase))
+    {
+        return 0;
+    }
+
+    return rspbase;
+}
+
 addr_t win_get_current_thread_teb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
     vmi_instance_t vmi = drakvuf->vmi;
@@ -294,12 +314,8 @@ bool win_get_last_error(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* 
         if (VMI_SUCCESS != vmi_pid_to_dtb(vmi, pid, &cr3))
             return false;
 
-    addr_t kthread = win_get_current_thread(drakvuf, info);
-    if (!kthread)
-        return false;
-
-    addr_t teb = 0;
-    if (VMI_SUCCESS != vmi_read_addr_va(vmi, kthread + drakvuf->offsets[KTHREAD_TEB], 0, &teb))
+    addr_t teb = win_get_current_thread_teb(drakvuf, info);
+    if (!teb)
         return false;
 
     ACCESS_CONTEXT(ctx,
@@ -320,9 +336,35 @@ bool win_get_last_error(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* 
     return true;
 }
 
+static addr_t win_get_file_name_ptr_from_controlarea(drakvuf_t drakvuf, addr_t control_area)
+{
+    bool is32bit = (drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E);
+    addr_t ex_fast_ref_mask = is32bit ? ~7ULL : ~0xfULL;
+
+    ACCESS_CONTEXT(ctx,
+        .translate_mechanism = VMI_TM_PROCESS_PID,
+        .pid = 4
+    );
+
+    ctx.addr = control_area + drakvuf->offsets[CONTROL_AREA_FILEPOINTER];
+
+    addr_t file_object = 0;
+    if (vmi_read_addr(drakvuf->vmi, &ctx, &file_object) == VMI_SUCCESS)
+    {
+        // file_object is a special _EX_FAST_REF pointer,
+        // we need to explicitly clear low bits
+        file_object &= ex_fast_ref_mask;
+
+        if (file_object)
+            return file_object + drakvuf->offsets[FILEOBJECT_NAME];
+    }
+
+    return 0;
+}
+
 static unicode_string_t* win_get_process_full_name(drakvuf_t drakvuf, addr_t eprocess_base)
 {
-    addr_t image_file_name_addr;
+    addr_t image_file_name_addr = 0;
     if ( vmi_read_addr_va(drakvuf->vmi,
             eprocess_base + drakvuf->offsets[EPROCESS_PROCCREATIONINFO] + drakvuf->offsets[PROCCREATIONINFO_IMAGEFILENAME],
             0, &image_file_name_addr) != VMI_SUCCESS )
@@ -331,42 +373,80 @@ static unicode_string_t* win_get_process_full_name(drakvuf_t drakvuf, addr_t epr
         return NULL;
     }
 
-    return drakvuf_read_unicode_va(drakvuf,
-            image_file_name_addr + drakvuf->offsets[OBJECTNAMEINFORMATION_NAME], 0);
+    if (image_file_name_addr)
+        return drakvuf_read_unicode_va(drakvuf,
+                image_file_name_addr + drakvuf->offsets[OBJECTNAMEINFORMATION_NAME], 0);
+    else
+    {
+        addr_t section_object = 0;
+        if ( vmi_read_addr_va(drakvuf->vmi,
+                eprocess_base + drakvuf->offsets[EPROCESS_SECTIONOBJECT],
+                0, &image_file_name_addr) == VMI_SUCCESS)
+        {
+            addr_t control_area = 0;
+            bool is_win7_win8 = vmi_get_winver( drakvuf->vmi ) <= VMI_OS_WINDOWS_8;
+            if (is_win7_win8)
+            {
+                addr_t segment = 0;
+                if ( vmi_read_addr_va(drakvuf->vmi,
+                        section_object + drakvuf->offsets[SECTIONOBJECT_SEGMENT],
+                        0, &segment) == VMI_SUCCESS)
+                {
+                    vmi_read_addr_va(drakvuf->vmi,
+                        segment + drakvuf->offsets[SEGMENT_CONTROLAREA],
+                        0, &control_area);
+                }
+            }
+            else
+            {
+                vmi_read_addr_va(drakvuf->vmi,
+                    section_object + drakvuf->offsets[SECTION_CONTROLAREA], 0, &control_area);
+            }
+
+            if (control_area)
+                return drakvuf_read_unicode_va(drakvuf, win_get_file_name_ptr_from_controlarea(drakvuf, control_area), 0);
+        }
+    }
+
+    return NULL;
+}
+
+static char* win_get_process_name_impl(unicode_string_t* fullname, bool fullpath)
+{
+    if ( !(fullname && fullname->contents && strlen((const char*)fullname->contents) > 0) )
+        return NULL;
+
+    // Moving ownership of fullname->contents to name for later cleanup
+    char* name = g_strdup((char*)fullname->contents);
+    // ImageFileName size differs between kernel builds & versions,
+    // relying on it would sometimes yield incomplete process name.
+    if ( !fullpath )
+    {
+        char** tokens = g_strsplit(name, "\\", -1);
+        int index = 0;
+
+        if (tokens && tokens[index])
+        {
+            g_free(name);
+            while (tokens[index])
+                name = tokens[index++];
+            name = g_strdup(name);
+        }
+
+        g_strfreev(tokens);
+    }
+
+    return name;
 }
 
 char* win_get_process_name(drakvuf_t drakvuf, addr_t eprocess_base, bool fullpath)
 {
-    unicode_string_t* fullname = win_get_process_full_name( drakvuf, eprocess_base );
-    char* name = vmi_read_str_va(drakvuf->vmi, eprocess_base + drakvuf->offsets[EPROCESS_PNAME], 0);
+    unicode_string_t* fullname = win_get_process_full_name(drakvuf, eprocess_base);
+    char* name = win_get_process_name_impl(fullname, fullpath);
+    vmi_free_unicode_str(fullname);
 
-    if (fullname && fullname->contents && strlen((const char*)fullname->contents) > 0)
-    {
-        g_free(name);
-        // Replace 'proc_data->name' with 'fullname->contents'
-        // Moving ownership of fullname->contents to name for later cleanup
-        name = g_strdup((char*)fullname->contents);
-        // ImageFileName size differs between kernel builds & versions,
-        // relying on it would sometimes yield incomplete process name.
-        if ( !fullpath )
-        {
-            char** tokens = g_strsplit(name, "\\", -1);
-            int index = 0;
-
-            if (tokens && tokens[index])
-            {
-                g_free(name);
-                while (tokens[index])
-                    name = tokens[index++];
-                name = g_strdup(name);
-            }
-
-            g_strfreev(tokens);
-        }
-    }
-
-    if (fullname)
-        vmi_free_unicode_str(fullname);
+    if (!name)
+        name = vmi_read_str_va(drakvuf->vmi, eprocess_base + drakvuf->offsets[EPROCESS_PNAME], 0);
 
     return name;
 }
@@ -483,27 +563,6 @@ bool win_get_process_dtb(drakvuf_t drakvuf, addr_t process_base, addr_t* dtb)
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-
-bool win_get_current_thread_id(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* thread_id)
-{
-    addr_t p_tid ;
-    addr_t ethread = win_get_current_thread(drakvuf, info);
-
-    if ( ethread )
-    {
-        if ( vmi_read_addr_va( drakvuf->vmi, ethread + drakvuf->offsets[ ETHREAD_CID ] + drakvuf->offsets[ CLIENT_ID_UNIQUETHREAD ],
-                0,
-                &p_tid ) == VMI_SUCCESS )
-        {
-            *thread_id = p_tid;
-
-            return true;
-        }
-    }
-
-    return false ;
-}
-
 static bool win_get_thread_id(drakvuf_t drakvuf, addr_t ethread, uint32_t* thread_id)
 {
     addr_t p_tid ;
@@ -519,6 +578,16 @@ static bool win_get_thread_id(drakvuf_t drakvuf, addr_t ethread, uint32_t* threa
     return false ;
 }
 
+
+bool win_get_current_thread_id(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* thread_id)
+{
+    addr_t ethread = win_get_current_thread(drakvuf, info);
+
+    if ( ethread )
+        return win_get_thread_id(drakvuf, ethread, thread_id);
+
+    return false ;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -594,6 +663,43 @@ bool win_is_eprocess( drakvuf_t drakvuf, addr_t dtb, addr_t eprocess_addr )
     }
 
     return false ;
+}
+
+GHashTable* win_enum_threads(drakvuf_t drakvuf, addr_t process)
+{
+    GHashTable* threads = g_hash_table_new(g_direct_hash, g_direct_equal);
+    vmi_instance_t vmi = drakvuf->vmi;
+
+    addr_t list_head;
+    if ( VMI_SUCCESS != vmi_read_addr_va(vmi, process + drakvuf->offsets[EPROCESS_LISTTHREADHEAD], 0, &list_head) )
+        return false;
+
+    addr_t current_list_entry = list_head;
+    addr_t next_list_entry;
+    if ( VMI_SUCCESS != vmi_read_addr_va(vmi, current_list_entry, 0, &next_list_entry) )
+    {
+        PRINT_DEBUG("Failed to read next pointer in loop at %"PRIx64"\n", current_list_entry);
+        return false;
+    }
+
+    do
+    {
+        addr_t current_thread = current_list_entry - drakvuf->offsets[ETHREAD_THREADLISTENTRY] ;
+
+        uint32_t tid = 0;
+        if (win_get_thread_id(drakvuf, current_thread, &tid))
+            g_hash_table_insert(threads, GINT_TO_POINTER((uint64_t)tid), GINT_TO_POINTER(current_thread));
+
+        current_list_entry = next_list_entry;
+
+        if ( VMI_SUCCESS != vmi_read_addr_va(vmi, current_list_entry, 0, &next_list_entry) )
+        {
+            PRINT_DEBUG("Failed to read next pointer in loop at %"PRIx64"\n", current_list_entry);
+            return false;
+        }
+    } while (next_list_entry != list_head);
+
+    return threads;
 }
 
 bool win_is_process_suspended(drakvuf_t drakvuf, addr_t process, bool* status)
@@ -1277,7 +1383,10 @@ bool win_get_process_data( drakvuf_t drakvuf, addr_t base_addr, proc_data_priv_t
         {
             if ( win_get_process_ppid( drakvuf, base_addr, &proc_data->ppid ) )
             {
-                proc_data->userid = win_get_process_userid( drakvuf, base_addr );
+                if (drakvuf->get_userid)
+                    proc_data->userid = win_get_process_userid( drakvuf, base_addr );
+                else
+                    proc_data->userid = 0;
                 proc_data->name   = win_get_process_name( drakvuf, base_addr, true );
 
                 if ( proc_data->name )
@@ -1445,7 +1554,6 @@ bool win_find_mmvad(drakvuf_t drakvuf, addr_t eprocess, addr_t vaddr, mmvad_info
             uint32_t pool_tag;
             addr_t subsection;
             addr_t control_area;
-            addr_t file_object;
             addr_t segment;
             uint32_t ptes;
             addr_t prototype_pte;
@@ -1453,6 +1561,7 @@ bool win_find_mmvad(drakvuf_t drakvuf, addr_t eprocess, addr_t vaddr, mmvad_info
             uint32_t flags1 = 0;
 
             out_mmvad->file_name_ptr = 0;
+            out_mmvad->node_addr = node_addr;
 
             if (is_win7)
             {
@@ -1497,18 +1606,7 @@ bool win_find_mmvad(drakvuf_t drakvuf, addr_t eprocess, addr_t vaddr, mmvad_info
 
                     if (vmi_read_addr(drakvuf->vmi, &ctx, &control_area) == VMI_SUCCESS)
                     {
-                        ctx.addr = control_area + drakvuf->offsets[CONTROL_AREA_FILEPOINTER];
-
-                        if (vmi_read_addr(drakvuf->vmi, &ctx, &file_object) == VMI_SUCCESS)
-                        {
-                            // file_object is a special _EX_FAST_REF pointer, we need to explicitly clear low bits
-                            file_object &= (~0xFULL);
-
-                            if ((void*)file_object != NULL)
-                            {
-                                out_mmvad->file_name_ptr = (file_object + drakvuf->offsets[FILEOBJECT_NAME]);
-                            }
-                        }
+                        out_mmvad->file_name_ptr = win_get_file_name_ptr_from_controlarea(drakvuf, control_area);
 
                         ctx.addr = control_area + drakvuf->offsets[CONTROL_AREA_SEGMENT];
 
@@ -1584,7 +1682,6 @@ static bool win_traverse_mmvad_node(drakvuf_t drakvuf, addr_t node_addr, mmvad_c
     uint32_t pool_tag;
     addr_t subsection;
     addr_t control_area;
-    addr_t file_object;
     addr_t segment;
     uint32_t ptes;
     addr_t prototype_pte;
@@ -1595,6 +1692,7 @@ static bool win_traverse_mmvad_node(drakvuf_t drakvuf, addr_t node_addr, mmvad_c
     mmvad.file_name_ptr = 0;
     mmvad.total_number_of_ptes = 0;
     mmvad.prototype_pte = 0;
+    mmvad.node_addr = node_addr;
 
     if (is_win7)
     {
@@ -1639,18 +1737,7 @@ static bool win_traverse_mmvad_node(drakvuf_t drakvuf, addr_t node_addr, mmvad_c
 
             if (vmi_read_addr(drakvuf->vmi, &ctx, &control_area) == VMI_SUCCESS)
             {
-                ctx.addr = control_area + drakvuf->offsets[CONTROL_AREA_FILEPOINTER];
-
-                if (vmi_read_addr(drakvuf->vmi, &ctx, &file_object) == VMI_SUCCESS)
-                {
-                    // file_object is a special _EX_FAST_REF pointer, we need to explicitly clear low bits
-                    file_object &= (~0xFULL);
-
-                    if ((void*)file_object != NULL)
-                    {
-                        mmvad.file_name_ptr = (file_object + drakvuf->offsets[FILEOBJECT_NAME]);
-                    }
-                }
+                mmvad.file_name_ptr = win_get_file_name_ptr_from_controlarea(drakvuf, control_area);
 
                 // FIXME We could get this fields form MMVAD.FirstPrototypePte and MMVAD.LastPrototypePte
                 ctx.addr = control_area + drakvuf->offsets[CONTROL_AREA_SEGMENT];
@@ -1749,6 +1836,18 @@ uint64_t win_mmvad_commit_charge(drakvuf_t drakvuf, mmvad_info_t* mmvad, uint64_
 uint32_t win_mmvad_type(drakvuf_t drakvuf, mmvad_info_t* mmvad)
 {
     int idx = MMVAD_FLAGS_VADTYPE;
+    return win_mmvad_flag(drakvuf, mmvad->flags, idx);
+}
+
+bool win_mmvad_private_memory(drakvuf_t drakvuf, mmvad_info_t* mmvad)
+{
+    int idx = MMVAD_FLAGS_PRIVATEMEMORY;
+    return win_mmvad_flag(drakvuf, mmvad->flags, idx);
+}
+
+uint64_t win_mmvad_protection(drakvuf_t drakvuf, mmvad_info_t* mmvad)
+{
+    int idx = MMVAD_FLAGS_PROTECTION;
     return win_mmvad_flag(drakvuf, mmvad->flags, idx);
 }
 

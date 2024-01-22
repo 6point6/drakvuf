@@ -105,7 +105,10 @@
 #ifndef SYSCALLS_WIN_H
 #define SYSCALLS_WIN_H
 
-void setup_windows(drakvuf_t drakvuf, syscalls* s);
+namespace syscalls_ns
+{
+
+void setup_windows(drakvuf_t drakvuf, syscalls* s, const syscalls_config* c);
 char* win_extract_string(syscalls* s, drakvuf_t drakvuf, drakvuf_trap_info_t* info, const arg_t& arg, addr_t val);
 
 #define NUMBER_SERVICE_TABLES   2
@@ -4089,6 +4092,13 @@ SYSCALL(NtUserWindowFromPoint, NTSTATUS);
 SYSCALL(NtUserYieldTask, NTSTATUS);
 SYSCALL(NtValidateCompositionSurfaceHandle, NTSTATUS);
 SYSCALL(NtVisualCaptureBits, NTSTATUS);
+SYSCALL(NtAcquireCrossVmMutant, NTSTATUS);
+SYSCALL(NtAllocateUserPhysicalPagesEx, NTSTATUS);
+SYSCALL(NtContinueEx, NTSTATUS);
+SYSCALL(NtCreateCrossVmEvent, NTSTATUS);
+SYSCALL(NtCreateCrossVmMutant, NTSTATUS);
+SYSCALL(NtPssCaptureVaSpaceBulk, NTSTATUS);
+SYSCALL(NtLoadKey3, NTSTATUS);
 
 #pragma clang diagnostic pop
 
@@ -4567,6 +4577,13 @@ static const syscall_t* nt[] =
     &GetPnpProperty,
     &ArbPreprocessEntry,
     &ArbAddReserved,
+    &NtAcquireCrossVmMutant,
+    &NtAllocateUserPhysicalPagesEx,
+    &NtContinueEx,
+    &NtCreateCrossVmEvent,
+    &NtCreateCrossVmMutant,
+    &NtPssCaptureVaSpaceBulk,
+    &NtLoadKey3,
 };
 
 static const syscall_t* win32k[] =
@@ -6012,5 +6029,7 @@ static const syscall_t* win32k[] =
 
 #define NUM_SYSCALLS_NT sizeof(nt)/sizeof(syscall_t*)
 #define NUM_SYSCALLS_WIN32K sizeof(win32k)/sizeof(syscall_t*)
+
+}
 
 #endif

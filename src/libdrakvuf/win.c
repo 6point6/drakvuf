@@ -102,7 +102,6 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <config.h>
 #include <stdlib.h>
 #include <sys/prctl.h>
 #include <string.h>
@@ -155,43 +154,49 @@ bool win_enumerate_module_info_ctx(drakvuf_t drakvuf, addr_t module_list_head, a
         addr_t base_addr;
         if (vmi_read_addr(vmi, ctx, &base_addr) == VMI_SUCCESS)
         {
-            ctx->addr = next_module + drakvuf->offsets[LDR_DATA_TABLE_ENTRY_BASEDLLNAME];
-            unicode_string_t* base_name = drakvuf_read_unicode_common(drakvuf, ctx);
-
-            if (base_name)
+            addr_t size = 0;
+            ctx->addr = next_module + drakvuf->offsets[LDR_DATA_TABLE_ENTRY_SIZEOFIMAGE];
+            if (vmi_read_addr(vmi, ctx, &size) == VMI_SUCCESS)
             {
-                PRINT_DEBUG("Found module %s at 0x%lx\n", base_name->contents, base_addr);
+                ctx->addr = next_module + drakvuf->offsets[LDR_DATA_TABLE_ENTRY_BASEDLLNAME];
+                unicode_string_t* base_name = drakvuf_read_unicode_common(drakvuf, ctx);
 
-                ctx->addr = next_module + drakvuf->offsets[LDR_DATA_TABLE_ENTRY_FULLDLLNAME];
-                unicode_string_t* full_name = drakvuf_read_unicode_common(drakvuf, ctx);
-
-                bool need_free = true;
-                bool need_stop = false;
-                bool success = true;
-                module_info_t* module_info = (module_info_t*)g_slice_alloc0( sizeof( module_info_t ) );
-                if (module_info)
+                if (base_name)
                 {
-                    module_info->base_addr = base_addr;
-                    module_info->base_name = base_name;
-                    module_info->full_name = full_name;
+                    PRINT_DEBUG("Found module %s at 0x%lx\n", base_name->contents, base_addr);
 
-                    success = visitor_func(drakvuf, module_info, &need_free, &need_stop, visitor_ctx);
+                    ctx->addr = next_module + drakvuf->offsets[LDR_DATA_TABLE_ENTRY_FULLDLLNAME];
+                    unicode_string_t* full_name = drakvuf_read_unicode_common(drakvuf, ctx);
 
-                    if (need_free)
-                        free_module_info(module_info);
+                    bool need_free = true;
+                    bool need_stop = false;
+                    bool success = true;
+                    module_info_t* module_info = (module_info_t*)g_slice_alloc0( sizeof( module_info_t ) );
+                    if (module_info)
+                    {
+                        module_info->base_addr = base_addr;
+                        module_info->size      = size;
+                        module_info->base_name = base_name;
+                        module_info->full_name = full_name;
+
+                        success = visitor_func(drakvuf, module_info, &need_free, &need_stop, visitor_ctx);
+
+                        if (need_free)
+                            free_module_info(module_info);
+                    }
+                    else
+                    {
+                        vmi_free_unicode_str(base_name);
+                        if (full_name)
+                            vmi_free_unicode_str(full_name);
+                    }
+
+                    if (need_stop)
+                        break;
+
+                    if (!success)
+                        return false;
                 }
-                else
-                {
-                    vmi_free_unicode_str(base_name);
-                    if (full_name)
-                        vmi_free_unicode_str(full_name);
-                }
-
-                if (need_stop)
-                    break;
-
-                if (!success)
-                    return false;
             }
         }
 
@@ -223,43 +228,49 @@ bool win_enumerate_module_info_ctx_wow(drakvuf_t drakvuf, addr_t module_list_hea
         uint32_t base_addr = 0;
         if (vmi_read_32(vmi, ctx, &base_addr) == VMI_SUCCESS)
         {
-            ctx->addr = next_module + drakvuf->wow_offsets[WOW_LDR_DATA_TABLE_ENTRY_BASEDLLNAME];
-            unicode_string_t* base_name = drakvuf_read_unicode32_common(drakvuf, ctx);
-
-            if (base_name)
+            uint32_t size = 0;
+            ctx->addr = next_module + drakvuf->offsets[WOW_LDR_DATA_TABLE_ENTRY_SIZEOFIMAGE];
+            if (vmi_read_32(vmi, ctx, &size) == VMI_SUCCESS)
             {
-                PRINT_DEBUG("Found WOW64 module %s at 0x%x\n", base_name->contents, base_addr);
+                ctx->addr = next_module + drakvuf->wow_offsets[WOW_LDR_DATA_TABLE_ENTRY_BASEDLLNAME];
+                unicode_string_t* base_name = drakvuf_read_unicode32_common(drakvuf, ctx);
 
-                ctx->addr = next_module + drakvuf->wow_offsets[WOW_LDR_DATA_TABLE_ENTRY_FULLDLLNAME];
-                unicode_string_t* full_name = drakvuf_read_unicode32_common(drakvuf, ctx);
-
-                bool need_free = true;
-                bool need_stop = false;
-                bool success = true;
-                module_info_t* module_info = (module_info_t*)g_slice_alloc0( sizeof( module_info_t ) );
-                if (module_info)
+                if (base_name)
                 {
-                    module_info->base_addr = base_addr;
-                    module_info->base_name = base_name;
-                    module_info->full_name = full_name;
+                    PRINT_DEBUG("Found WOW64 module %s at 0x%x\n", base_name->contents, base_addr);
 
-                    success = visitor_func(drakvuf, module_info, &need_free, &need_stop, visitor_ctx);
+                    ctx->addr = next_module + drakvuf->wow_offsets[WOW_LDR_DATA_TABLE_ENTRY_FULLDLLNAME];
+                    unicode_string_t* full_name = drakvuf_read_unicode32_common(drakvuf, ctx);
 
-                    if (need_free)
-                        free_module_info(module_info);
+                    bool need_free = true;
+                    bool need_stop = false;
+                    bool success = true;
+                    module_info_t* module_info = (module_info_t*)g_slice_alloc0( sizeof( module_info_t ) );
+                    if (module_info)
+                    {
+                        module_info->base_addr = base_addr;
+                        module_info->size      = size;
+                        module_info->base_name = base_name;
+                        module_info->full_name = full_name;
+
+                        success = visitor_func(drakvuf, module_info, &need_free, &need_stop, visitor_ctx);
+
+                        if (need_free)
+                            free_module_info(module_info);
+                    }
+                    else
+                    {
+                        vmi_free_unicode_str(base_name);
+                        if (full_name)
+                            vmi_free_unicode_str(full_name);
+                    }
+
+                    if (need_stop)
+                        break;
+
+                    if (!success)
+                        return false;
                 }
-                else
-                {
-                    vmi_free_unicode_str(base_name);
-                    if (full_name)
-                        vmi_free_unicode_str(full_name);
-                }
-
-                if (need_stop)
-                    break;
-
-                if (!success)
-                    return false;
             }
         }
 
@@ -316,6 +327,25 @@ bool win_inject_traps_modules(drakvuf_t drakvuf, drakvuf_trap_t* trap, addr_t li
     return false;
 }
 
+addr_t win_kernel_symbol_to_va(drakvuf_t drakvuf, const char* func)
+{
+    addr_t rva;
+    if (!drakvuf_get_kernel_symbol_rva(drakvuf, func, &rva))
+    {
+        PRINT_DEBUG("Failed to get RVA of nt!%s\n", func);
+        return 0;
+    }
+
+    addr_t va = drakvuf_exportksym_to_va(drakvuf, 4, NULL, "ntoskrnl.exe", rva);
+    if (!va)
+    {
+        PRINT_DEBUG("Failed to get VA of nt!%s\n", func);
+        return 0;
+    }
+
+    return va;
+}
+
 bool win_get_module_base_addr_ctx(drakvuf_t drakvuf, addr_t module_list_head, access_context_t* ctx, const char* module_name, addr_t* base_addr_out)
 {
     struct find_module_visitor_ctx visitor_ctx = { .module_name = module_name, .ret = NULL };
@@ -338,7 +368,7 @@ bool win_get_module_base_addr(drakvuf_t drakvuf, addr_t module_list_head, const 
 {
     ACCESS_CONTEXT(ctx,
         .translate_mechanism = VMI_TM_PROCESS_PID,
-        .pid = 4,
+        .pid = 4
     );
 
     return win_get_module_base_addr_ctx(drakvuf, module_list_head, &ctx, module_name, base_addr_out);
@@ -428,7 +458,7 @@ addr_t win_get_function_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info, a
     ACCESS_CONTEXT(ctx,
         .translate_mechanism = VMI_TM_PROCESS_DTB,
         .dtb = info->regs->cr3,
-        .addr = info->regs->rsp + narg * (is32 ? 4 : 8),
+        .addr = info->regs->rsp + narg * (is32 ? 4 : 8)
     );
 
     addr_t ret;
@@ -442,7 +472,7 @@ addr_t win_get_function_return_address(drakvuf_t drakvuf, drakvuf_trap_info_t* i
     ACCESS_CONTEXT(ctx,
         .translate_mechanism = VMI_TM_PROCESS_DTB,
         .dtb = info->regs->cr3,
-        .addr = info->regs->rsp,
+        .addr = info->regs->rsp
     );
 
     addr_t ret_addr;
@@ -477,6 +507,22 @@ bool win_check_return_context(drakvuf_trap_info_t* info, vmi_pid_t pid, uint32_t
         && (!rsp || info->regs->rsp >= rsp);
 }
 
+bool win_get_kernel_symbol_rva(drakvuf_t drakvuf, const char* function, addr_t* rva)
+{
+    json_object* kernel_json = vmi_get_kernel_json(drakvuf->vmi);
+    return VMI_SUCCESS == vmi_get_symbol_addr_from_json(drakvuf->vmi, kernel_json, function, rva);
+}
+
+bool win_get_kernel_symbol_va(drakvuf_t drakvuf, const char* function, addr_t* va)
+{
+    json_object* kernel_json = vmi_get_kernel_json(drakvuf->vmi);
+    if (VMI_FAILURE == vmi_get_symbol_addr_from_json(drakvuf->vmi, kernel_json, function, va))
+        return false;
+
+    *va += drakvuf_get_kernel_base(drakvuf);
+    return true;
+}
+
 bool set_os_windows(drakvuf_t drakvuf)
 {
     if ( !find_kernbase(drakvuf) )
@@ -505,6 +551,10 @@ bool set_os_windows(drakvuf_t drakvuf)
     {
         return 0;
     }
+    if ( VMI_FAILURE == vmi_get_struct_size_from_json(drakvuf->vmi, vmi_get_kernel_json(drakvuf->vmi), "_EPROCESS", &drakvuf->sizes[EPROCESS]) )
+    {
+        return 0;
+    }
 
     drakvuf->osi.get_current_irql = win_get_current_irql;
     drakvuf->osi.get_current_thread = win_get_current_thread;
@@ -527,11 +577,13 @@ bool set_os_windows(drakvuf_t drakvuf)
     drakvuf->osi.get_module_base_addr_ctx = win_get_module_base_addr_ctx;
     drakvuf->osi.is_process = win_is_eprocess;
     drakvuf->osi.is_process_suspended = win_is_process_suspended;
+    drakvuf->osi.enum_threads = win_enum_threads;
     drakvuf->osi.is_thread = win_is_ethread;
     drakvuf->osi.get_module_list = win_get_module_list;
     drakvuf->osi.get_module_list_wow = win_get_module_list_wow;
     drakvuf->osi.find_process = win_find_eprocess;
     drakvuf->osi.inject_traps_modules = win_inject_traps_modules;
+    drakvuf->osi.kernel_symbol_to_va = win_kernel_symbol_to_va;
     drakvuf->osi.exportksym_to_va = ksym2va;
     drakvuf->osi.exportsym_to_va = eprocess_sym2va;
     drakvuf->osi.get_process_pid = win_get_process_pid;
@@ -553,6 +605,8 @@ bool set_os_windows(drakvuf_t drakvuf)
     drakvuf->osi.is_mmvad_commited = win_is_mmvad_commited;
     drakvuf->osi.mmvad_commit_charge = win_mmvad_commit_charge;
     drakvuf->osi.mmvad_type = win_mmvad_type;
+    drakvuf->osi.mmvad_private_memory = win_mmvad_private_memory;
+    drakvuf->osi.mmvad_protection = win_mmvad_protection;
     drakvuf->osi.get_pid_from_handle = win_get_pid_from_handle;
     drakvuf->osi.get_tid_from_handle = win_get_tid_from_handle;
     drakvuf->osi.get_wow_context = win_get_wow_context;
@@ -560,6 +614,9 @@ bool set_os_windows(drakvuf_t drakvuf)
     drakvuf->osi.get_user_stack64 = win_get_user_stack64;
     drakvuf->osi.get_wow_peb = win_get_wow_peb;
     drakvuf->osi.check_return_context = win_check_return_context;
+    drakvuf->osi.get_rspbase = win_get_rspbase;
+    drakvuf->osi.get_kernel_symbol_rva = win_get_kernel_symbol_rva;
+    drakvuf->osi.get_kernel_symbol_va = win_get_kernel_symbol_va;
 
     return true;
 }

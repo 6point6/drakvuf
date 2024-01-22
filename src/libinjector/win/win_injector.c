@@ -110,6 +110,7 @@
 #include "methods/win_createproc.h"
 #include "methods/win_shellexec.h"
 #include "methods/win_terminate.h"
+#include "methods/win_exitthread.h"
 
 static bool injector_set_hijacked(injector_t injector, drakvuf_trap_info_t* info)
 {
@@ -147,6 +148,7 @@ static event_response_t mem_callback(drakvuf_t drakvuf, drakvuf_trap_info_t* inf
 {
     (void)drakvuf;
     injector_t injector = info->trap->data;
+    base_injector_t base_injector = &injector->base_injector;
 
     if ( info->proc_data.pid != injector->target_pid || ( injector->target_tid && (uint32_t)info->proc_data.tid != injector->target_tid ))
     {
@@ -206,11 +208,11 @@ static event_response_t mem_callback(drakvuf_t drakvuf, drakvuf_trap_info_t* inf
         }
     }
 
-    if (!injector->step_override)
-        injector->step+=1;
+    if (!base_injector->step_override)
+        base_injector->step+=1;
 
-    injector->step_override = false;
-    return handle_gprs_registers(drakvuf, info, event);
+    base_injector->step_override = false;
+    return handle_gprs_registers(drakvuf, info, base_injector, event);
 }
 
 static event_response_t wait_for_crash_of_target_process(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
@@ -382,6 +384,7 @@ bool check_int3_trap(injector_t injector, drakvuf_trap_info_t* info)
 event_response_t injector_int3_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
     injector_t injector = info->trap->data;
+    base_injector_t base_injector = &injector->base_injector;
 
     if (!check_int3_trap(injector, info))
         return VMI_EVENT_RESPONSE_NONE;
@@ -422,6 +425,11 @@ event_response_t injector_int3_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
             event = handle_win_terminate(drakvuf, info);
             break;
         }
+        case INJECT_METHOD_EXITTHREAD:
+        {
+            event = handle_win_exitthread(drakvuf, info);
+            break;
+        }
         default:
         {
             fprintf(stderr, "This method is not implemented for 64bit\n");
@@ -435,11 +443,11 @@ event_response_t injector_int3_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     if (!injector->hijacked)
         return 0;
 
-    if (!injector->step_override)
-        injector->step+=1;
+    if (!base_injector->step_override)
+        base_injector->step+=1;
 
-    injector->step_override = false;
-    return handle_gprs_registers(drakvuf, info, event);
+    base_injector->step_override = false;
+    return handle_gprs_registers(drakvuf, info, base_injector, event);
 
 }
 
@@ -474,7 +482,9 @@ static bool inject(drakvuf_t drakvuf, injector_t injector)
 
     if (!drakvuf_is_interrupted(drakvuf))
     {
-        const char* method = injector->method == INJECT_METHOD_TERMINATEPROC ? "termination" : "injection";
+#ifdef DRAKVUF_DEBUG
+        const char* method = injector->method == INJECT_METHOD_TERMINATEPROC ? "termination" : ( injector->method == INJECT_METHOD_EXITTHREAD ? "exitthread" : "injection");
+#endif
         PRINT_DEBUG("Starting %s loop\n", method);
         drakvuf_loop(drakvuf, is_interrupted, NULL);
         PRINT_DEBUG("Finished %s loop\n", method);
@@ -527,6 +537,12 @@ static bool initialize_injector_functions(drakvuf_t drakvuf, injector_t injector
             injector->exit_process = get_function_va(drakvuf, eprocess_base, "ntdll.dll", "RtlExitUserProcess", injector->global_search);
             if (!injector->exit_process) return false;
             injector->exec_func = get_function_va(drakvuf, eprocess_base, "kernel32.dll", "CreateRemoteThread", injector->global_search);
+            break;
+        }
+        case INJECT_METHOD_EXITTHREAD:
+        {
+            injector->exit_thread = get_function_va(drakvuf, eprocess_base, "ntdll.dll", "RtlExitUserThread", injector->global_search);
+            if (!injector->exit_thread) return false;
             break;
         }
         case INJECT_METHOD_SHELLEXEC:
@@ -648,15 +664,15 @@ injector_status_t injector_start_app_on_win(
     injector->error_code.valid = false;
     injector->error_code.code = -1;
     injector->error_code.string = "<UNKNOWN>";
-    injector->step = STEP1;
-    injector->step_override = false;
-    injector->set_gprs_only = true;
+    injector->base_injector.step = STEP1;
+    injector->base_injector.step_override = false;
+    injector->base_injector.set_gprs_only = true;
 
     if (!initialize_injector_functions(drakvuf, injector, file))
     {
         PRINT_DEBUG("Unable to initialize injector functions\n");
         injector->result = INJECT_RESULT_INIT_FAIL;
-        print_injection_info(format, file, injector);
+        print_win_injection_info(format, file, injector);
         free_injector(injector);
         return 0;
     }
@@ -664,7 +680,7 @@ injector_status_t injector_start_app_on_win(
     if (inject(drakvuf, injector) && injector->rc == INJECTOR_SUCCEEDED)
     {
         injector->result = INJECT_RESULT_SUCCESS;
-        print_injection_info(format, file, injector);
+        print_win_injection_info(format, file, injector);
     }
     else
     {
@@ -672,13 +688,13 @@ injector_status_t injector_start_app_on_win(
         {
             PRINT_DEBUG("Injection timeout\n");
             injector->result = INJECT_RESULT_TIMEOUT;
-            print_injection_info(format, file, injector);
+            print_win_injection_info(format, file, injector);
         }
         else if (SIGDRAKVUFCRASH == drakvuf_is_interrupted(drakvuf))
         {
             PRINT_DEBUG("Target process crash detected\n");
             injector->result = INJECT_RESULT_CRASH;
-            print_injection_info(format, file, injector);
+            print_win_injection_info(format, file, injector);
         }
         else if (injector->error_code.valid)
         {
@@ -686,13 +702,13 @@ injector_status_t injector_start_app_on_win(
                 injector->error_code.string,
                 injector->error_code.code);
             injector->result = INJECT_RESULT_ERROR_CODE;
-            print_injection_info(format, file, injector);
+            print_win_injection_info(format, file, injector);
         }
         else
         {
             PRINT_DEBUG("Injection premature break\n");
             injector->result = INJECT_RESULT_PREMATURE;
-            print_injection_info(format, file, injector);
+            print_win_injection_info(format, file, injector);
         }
     }
 
@@ -740,8 +756,38 @@ void injector_terminate_on_win(drakvuf_t drakvuf,
     injector->target_tid = injection_tid;
     injector->is32bit = (drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E);
     injector->terminate_pid = pid;
-    injector->step_override = false;
-    injector->step = STEP1;
+    injector->base_injector.step_override = false;
+    injector->base_injector.step = STEP1;
+
+    if (!initialize_injector_functions(drakvuf, injector, NULL))
+    {
+        PRINT_DEBUG("Unable to initialize injector functions\n");
+        free_injector(injector);
+        return;
+    }
+
+    inject(drakvuf, injector);
+    PRINT_DEBUG("Finished with termination. Ret: %i.\n", injector->rc);
+
+    free_injector(injector);
+}
+
+void injector_exitthread_on_win(drakvuf_t drakvuf,
+    vmi_pid_t injection_pid,
+    uint32_t injection_tid)
+{
+    PRINT_DEBUG("Target PID %u to terminate TID %u\n", injection_pid, injection_tid);
+    drakvuf_interrupt(drakvuf, 0); // clean
+
+    injector_t injector = (injector_t)g_try_malloc0(sizeof(struct injector));
+
+    injector->method = INJECT_METHOD_EXITTHREAD;
+    injector->drakvuf = drakvuf;
+    injector->target_pid = injection_pid;
+    injector->target_tid = injection_tid;
+    injector->is32bit = (drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E);
+    injector->base_injector.step_override = false;
+    injector->base_injector.step = STEP1;
 
     if (!initialize_injector_functions(drakvuf, injector, NULL))
     {

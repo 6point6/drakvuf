@@ -105,21 +105,31 @@
 #ifndef DRAKVUF_PLUGINS_H
 #define DRAKVUF_PLUGINS_H
 
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
+
 #include <array>
 #include <memory>
+#include <unordered_map>
 #include <stdlib.h>
 #include <inttypes.h>
 #include <sys/time.h>
-#include <libdrakvuf/libdrakvuf.h>
 
-#include <unordered_map>
+#include <libdrakvuf/libdrakvuf.h>
+#include <libdrakvuf/json-util.h>
+
+#if defined(LIBDRAKVUF_PRIVATE_GUARD)
+#error You should never include libdrakvuf/private.h in a plugin
+#endif
 
 struct plugins_options
 {
-    const char* dump_folder;            // PLUGIN_FILEDELETE
+    const char* dump_folder;            // PLUGIN_FILEDELETE, PLUGIN_FILEEXTRACTOR
+#ifdef PLUGIN_ENABLE_FILEDELETE
     bool dump_modified_files;           // PLUGIN_FILEDELETE
     bool filedelete_use_injector;       // PLUGIN_FILEDELETE
+#endif
     bool cpuid_stealth;                 // PLUGIN_CPUIDMON
     const char* tcpip_profile;          // PLUGIN_SOCKETMON
     const char* win32k_profile;         // PLUGIN_CLIPBOARDMON, PLUGIN_WINDOWMON, PLUGIN_SYSCALLS
@@ -132,6 +142,7 @@ struct plugins_options
     const char* syscalls_filter_file;   // PLUGIN_SYSCALLS
     bool disable_sysret;                // PLUGIN_SYSCALLS
     bool abort_on_bsod;                 // PLUGIN_BSODMON
+    const char* crashdump_dir;          // PLUGIN_BSODMON
     const char* ntdll_profile;          // PLUGIN_LIBRARYMON
     const char* ole32_profile;          // PLUGIN_WMIMON
     const char* wow_ole32_profile;      // PLUGIN_WMIMON
@@ -148,9 +159,11 @@ struct plugins_options
     bool userhook_no_addr;              // PLUGIN_MEMDUMP, PLUGIN_APIMON
     const char* clr_profile;            // PLUGIN_MEMDUMP
     const char* mscorwks_profile;       // PLUGIN_MEMDUMP
+    uint32_t procdump_timeout;          // PLUGIN_PROCDUMP
     const char* procdump_dir;           // PLUGIN_PROCDUMP
     bool compress_procdumps = false;    // PLUGIN_PROCDUMP
     vmi_pid_t procdump_on_finish;       // PLUGIN_PROCDUMP2
+    bool procdump_new_processes_on_finish; // PLUGIN_PROCDUMP2
     std::shared_ptr<std::unordered_map<vmi_pid_t, bool>> terminated_processes; // PLUGIN_PROCDUMP
     const char* hal_profile;            // PLUGIN_PROCDUMP2
     bool procdump_disable_kideliverapc_hook; // PLUGIN_PROCDUMP2
@@ -172,7 +185,12 @@ struct plugins_options
     bool hidsim_random_clicks;          // PLUGIN_HIDSIM
     const char* fwpkclnt_profile;       // PLUGIN_ROOTKITMON
     const char* fltmgr_profile;         // PLUGIN_ROOTKITMON
+    const char* ci_profile;             // PLUGIN_ROOTKITMON
+    const char* services_profile;       // PLUGIN_DKOMMON
     const char* netio_profile;          // PLUGIN_CALLBACKMON
+    const char* ndis_profile;           // PLUGIN_CALLBACKMON
+    uint64_t hidevm_delay;              // PLUGIN_HIDEVM
+    uint64_t unixsocketmon_max_size;    // PLUGIN_UNIXSOCKETMON
 };
 
 typedef enum drakvuf_plugin
@@ -181,6 +199,7 @@ typedef enum drakvuf_plugin
     PLUGIN_POOLMON,
     PLUGIN_FILETRACER,
     PLUGIN_FILEDELETE,
+    PLUGIN_FILEEXTRACTOR,
     PLUGIN_OBJMON,
     PLUGIN_EXMON,
     PLUGIN_SSDTMON,
@@ -210,7 +229,13 @@ typedef enum drakvuf_plugin
     PLUGIN_IPT,
     PLUGIN_HIDSIM,
     PLUGIN_ROOTKITMON,
+    PLUGIN_SPRAYMON,
     PLUGIN_CALLBACKMON,
+    PLUGIN_HIDEVM,
+    PLUGIN_PTRACEMON,
+    PLUGIN_EBPFMON,
+    PLUGIN_UNIXSOCKETMON,
+    PLUGIN_ETWMON,
     __DRAKVUF_PLUGIN_LIST_MAX
 } drakvuf_plugin_t;
 
@@ -220,6 +245,7 @@ static const char* drakvuf_plugin_names[] =
     [PLUGIN_POOLMON] = "poolmon",
     [PLUGIN_FILETRACER] = "filetracer",
     [PLUGIN_FILEDELETE] = "filedelete",
+    [PLUGIN_FILEEXTRACTOR] = "fileextractor",
     [PLUGIN_OBJMON] = "objmon",
     [PLUGIN_EXMON] = "exmon",
     [PLUGIN_SSDTMON] = "ssdtmon",
@@ -249,7 +275,13 @@ static const char* drakvuf_plugin_names[] =
     [PLUGIN_IPT] = "ipt",
     [PLUGIN_HIDSIM] = "hidsim",
     [PLUGIN_ROOTKITMON] = "rootkitmon",
+    [PLUGIN_SPRAYMON] = "spraymon",
     [PLUGIN_CALLBACKMON] = "callbackmon",
+    [PLUGIN_HIDEVM] = "hidevm",
+    [PLUGIN_PTRACEMON] = "ptracemon",
+    [PLUGIN_EBPFMON] = "ebpfmon",
+    [PLUGIN_UNIXSOCKETMON] = "unixsocketmon",
+    [PLUGIN_ETWMON] = "etwmon",
 };
 
 static const bool drakvuf_plugin_os_support[__DRAKVUF_PLUGIN_LIST_MAX][VMI_OS_WINDOWS+1] =
@@ -258,6 +290,7 @@ static const bool drakvuf_plugin_os_support[__DRAKVUF_PLUGIN_LIST_MAX][VMI_OS_WI
     [PLUGIN_POOLMON]      = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_FILETRACER]   = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 1 },
     [PLUGIN_FILEDELETE]   = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
+    [PLUGIN_FILEEXTRACTOR]= { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_OBJMON]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_EXMON]        = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_SSDTMON]      = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
@@ -266,7 +299,7 @@ static const bool drakvuf_plugin_os_support[__DRAKVUF_PLUGIN_LIST_MAX][VMI_OS_WI
     [PLUGIN_CPUIDMON]     = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 1 },
     [PLUGIN_SOCKETMON]    = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_REGMON]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
-    [PLUGIN_PROCMON]      = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
+    [PLUGIN_PROCMON]      = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 1 },
     [PLUGIN_BSODMON]      = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_ENVMON]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_CRASHMON]     = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
@@ -287,7 +320,13 @@ static const bool drakvuf_plugin_os_support[__DRAKVUF_PLUGIN_LIST_MAX][VMI_OS_WI
     [PLUGIN_IPT]          = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 1 },
     [PLUGIN_HIDSIM]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 1 },
     [PLUGIN_ROOTKITMON]   = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
+    [PLUGIN_SPRAYMON]     = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
     [PLUGIN_CALLBACKMON]  = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
+    [PLUGIN_HIDEVM]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
+    [PLUGIN_PTRACEMON]    = { [VMI_OS_WINDOWS] = 0, [VMI_OS_LINUX] = 1 },
+    [PLUGIN_EBPFMON]      = { [VMI_OS_WINDOWS] = 0, [VMI_OS_LINUX] = 1 },
+    [PLUGIN_UNIXSOCKETMON]= { [VMI_OS_WINDOWS] = 0, [VMI_OS_LINUX] = 1 },
+    [PLUGIN_ETWMON]       = { [VMI_OS_WINDOWS] = 1, [VMI_OS_LINUX] = 0 },
 };
 
 class plugin
@@ -340,34 +379,8 @@ public:
 
 struct vmi_lock_guard
 {
-    vmi_lock_guard(drakvuf_t drakvuf_) : drakvuf(drakvuf_), vmi()
+    explicit vmi_lock_guard(drakvuf_t drakvuf) : drakvuf{drakvuf}, vmi{drakvuf_lock_and_get_vmi(drakvuf)}
     {
-        lock();
-    }
-
-    vmi_instance_t lock()
-    {
-        if (!vmi)
-            vmi = drakvuf_lock_and_get_vmi(drakvuf);
-
-        return vmi;
-    }
-
-    bool unlock()
-    {
-        if (vmi)
-        {
-            drakvuf_release_vmi(drakvuf);
-            vmi = nullptr;
-            return true;
-        }
-        return false;
-
-    }
-
-    bool is_lock() const
-    {
-        return vmi == nullptr ? true : false;
     }
 
     operator vmi_instance_t() const
@@ -377,9 +390,10 @@ struct vmi_lock_guard
 
     ~vmi_lock_guard()
     {
-        unlock();
+        drakvuf_release_vmi(drakvuf);
     }
 
+private:
     drakvuf_t drakvuf;
     vmi_instance_t vmi;
 };

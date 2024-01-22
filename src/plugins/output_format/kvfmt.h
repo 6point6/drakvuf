@@ -147,6 +147,11 @@ struct DataPrinter
         return true;
     }
 
+    static bool print(std::ostream& os, const flagsval& flags, char sep)
+    {
+        return print_data(os, fmt::Rstr(flags.values), sep);
+    }
+
     template <class Tv = T>
     static bool print(std::ostream& os, const fmt::Nval<Tv>& data, char)
     {
@@ -184,7 +189,46 @@ struct DataPrinter
     template <class Tv = T>
     static bool print(std::ostream& os, const fmt::Qstr<Tv>& data, char)
     {
-        os << '"' << data.value << '"';
+        return print_escaped(os, data.value);
+    }
+
+    template <class Tv = T>
+    static bool print(std::ostream& os, const fmt::Estr<Tv>& data, char)
+    {
+        return print_escaped(os, data.value);
+    }
+
+    template <class Tv = T>
+    static bool print(std::ostream& os, const fmt::BinaryString<Tv>& data, char)
+    {
+        data.format(os);
+        return true;
+    }
+
+    static bool print_escaped(std::ostream& os, const std::string& value)
+    {
+        char const* const hexdig = "0123456789ABCDEF";
+        os << '"';
+        for (unsigned char c: value)
+            switch (c)
+            {
+                case '\r':
+                    os << "\\r";
+                    break;
+                case '\n':
+                    os << "\\n";
+                    break;
+                case '"':
+                    os << "\\\"";
+                    break;
+                default:
+                    if (c < ' ')
+                        os << "\\x" << hexdig[c >> 4] << hexdig[c & 0xF];
+                    else
+                        os << c;
+                    break;
+            }
+        os << '"';
         return true;
     }
 

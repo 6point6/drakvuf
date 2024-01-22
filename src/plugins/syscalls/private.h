@@ -105,6 +105,9 @@
 #ifndef SYSCALLS_PRIVATE_H
 #define SYSCALLS_PRIVATE_H
 
+namespace syscalls_ns
+{
+
 typedef enum
 {
     DIR_IN,
@@ -457,6 +460,20 @@ typedef struct
     const arg_t* args;
 } syscall_t;
 
+typedef struct
+{
+    void* plugin;
+    addr_t size_rva;
+    addr_t name_rva;
+} pass_ctx_t;
+
+typedef struct
+{
+    const char* name;
+    addr_t base;
+    addr_t size;
+} resolve_ctx_t;
+
 struct wrapper_t : public call_result_t
 {
     wrapper_t() : call_result_t()
@@ -476,11 +493,27 @@ struct wrapper_t : public call_result_t
      .args = (const arg_t*)&_name ## _arg                        \
    }
 
-void print_syscall(syscalls* s, drakvuf_t drakvuf, os_t os,
-    bool syscall, drakvuf_trap_info_t* info,
-    int nr, std::string module, const syscall_t* sc,
+void print_syscall(
+    syscalls* s,
+    drakvuf_t drakvuf,
+    drakvuf_trap_info_t* info,
+    int nr,
+    std::string&& module,
+    const syscall_t* sc,
     const std::vector<uint64_t>& args,
-    uint64_t ret, const char* extra_info);
+    bool inlined
+);
+
+void print_sysret(
+    syscalls* s,
+    drakvuf_t drakvuf,
+    drakvuf_trap_info_t* info,
+    int nr,
+    std::string&& module,
+    const syscall_t* sc,
+    uint64_t ret,
+    const char* extra_info = nullptr
+);
 
 // NOTE Non "pluginex" support for linux
 struct wrapper;
@@ -496,5 +529,7 @@ struct wrapper
     addr_t stack_fingerprint;
 };
 void free_trap(gpointer p);
+
+}
 
 #endif // commoncsproto_h

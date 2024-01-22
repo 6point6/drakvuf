@@ -102,7 +102,6 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <config.h>
 #include <glib.h>
 #include <inttypes.h>
 #include <libvmi/libvmi.h>
@@ -116,6 +115,11 @@
 #include "private.h"
 #include "win.h"
 #include "linux.h"
+
+using namespace syscalls_ns;
+
+namespace syscalls_ns
+{
 
 static std::string extract_string(syscalls* s, drakvuf_t drakvuf, drakvuf_trap_info_t* info, const arg_t& arg, addr_t val)
 {
@@ -185,7 +189,7 @@ static uint64_t transform_value(drakvuf_t drakvuf, drakvuf_trap_info_t* info, co
         ACCESS_CONTEXT(ctx,
             .translate_mechanism = VMI_TM_PROCESS_DTB,
             .dtb = info->regs->cr3,
-            .addr = val,
+            .addr = val
         );
 
         uint64_t _val;
@@ -201,52 +205,59 @@ static uint64_t transform_value(drakvuf_t drakvuf, drakvuf_trap_info_t* info, co
     return mask_value(arg, val);
 }
 
-void print_syscall(syscalls* s, drakvuf_t drakvuf, os_t os,
-    bool syscall, drakvuf_trap_info_t* info,
-    int nr, std::string module, const syscall_t* sc,
-    const std::vector<uint64_t>& args,
+void print_syscall(
+    syscalls* s, drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    int nr, std::string&& module, const syscall_t* sc,
+    const std::vector<uint64_t>& args, bool inlined
+)
+{
+    if (sc)
+        info->trap->name = sc->name;
+
+    s->fmt_args.clear();
+
+    if (sc)
+    {
+        for (size_t i = 0; i < args.size(); ++i)
+        {
+            auto str = extract_string(s, drakvuf, info, sc->args[i], args[i]);
+            if ( !str.empty() )
+                s->fmt_args.push_back(keyval(sc->args[i].name, fmt::Estr(str)));
+            else
+            {
+                uint64_t val = transform_value(drakvuf, info, sc->args[i], args[i]);
+                s->fmt_args.push_back(keyval(sc->args[i].name, fmt::Xval(val)));
+            }
+        }
+    }
+
+    fmt::print(s->format, "syscall", drakvuf, info,
+        keyval("Module", fmt::Qstr(std::move(module))),
+        keyval("vCPU", fmt::Nval(info->vcpu)),
+        keyval("CR3", fmt::Xval(info->regs->cr3)),
+        keyval("Syscall", fmt::Nval(nr)),
+        keyval("NArgs", fmt::Nval(args.size())),
+        keyval("Inlined", fmt::Qstr(inlined ? "True" : "False")),
+        s->fmt_args
+    );
+}
+
+void print_sysret(
+    syscalls* s, drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    int nr, std::string&& module, const syscall_t* sc,
     uint64_t ret, const char* extra_info)
 {
     if (sc)
         info->trap->name = sc->name;
 
-    if (syscall)
-    {
-        s->fmt_args.clear();
-
-        if (sc)
-            for (size_t i = 0; i < args.size(); ++i)
-            {
-                auto str = extract_string(s, drakvuf, info, sc->args[i], args[i]);
-                if ( !str.empty() )
-                    s->fmt_args.push_back(keyval(sc->args[i].name, fmt::Qstr(str)));
-                else
-                {
-                    uint64_t val = transform_value(drakvuf, info, sc->args[i], args[i]);
-                    s->fmt_args.push_back(keyval(sc->args[i].name, fmt::Xval(val)));
-                }
-            }
-
-        fmt::print(s->format, "syscall", drakvuf, info,
-            keyval("Module", fmt::Qstr(module)),
-            keyval("vCPU", fmt::Nval(info->vcpu)),
-            keyval("CR3", fmt::Xval(info->regs->cr3)),
-            keyval("Syscall", fmt::Nval(nr)),
-            keyval("NArgs", fmt::Nval(args.size())),
-            s->fmt_args
-        );
-    }
-    else
-    {
-        fmt::print(s->format, "sysret", drakvuf, info,
-            keyval("Module", fmt::Qstr(module)),
-            keyval("vCPU", fmt::Nval(info->vcpu)),
-            keyval("CR3", fmt::Xval(info->regs->cr3)),
-            keyval("Syscall", fmt::Nval(nr)),
-            keyval("Ret", fmt::Nval(ret)),
-            keyval("Info", fmt::Rstr(extra_info ?: ""))
-        );
-    }
+    fmt::print(s->format, "sysret", drakvuf, info,
+        keyval("Module", fmt::Qstr(std::move(module))),
+        keyval("vCPU", fmt::Nval(info->vcpu)),
+        keyval("CR3", fmt::Xval(info->regs->cr3)),
+        keyval("Syscall", fmt::Nval(nr)),
+        keyval("Ret", fmt::Nval(ret)),
+        keyval("Info", fmt::Rstr(extra_info ?: ""))
+    );
 }
 
 static GHashTable* read_syscalls_filter(const char* filter_file)
@@ -292,13 +303,16 @@ void free_trap(gpointer p)
     g_slice_free(drakvuf_trap_t, t);
 }
 
+}
+
 syscalls::syscalls(drakvuf_t drakvuf, const syscalls_config* c, output_format_t output)
     : pluginex(drakvuf, output)
     , traps(NULL)
+    , strings_to_free(NULL)
     , filter(NULL)
-    , win32k_json(NULL)
     , format{output}
     , offsets(NULL)
+    , win32k_profile{c->win32k_profile ?: ""}
 {
     this->os = drakvuf_get_os_type(drakvuf);
     this->kernel_base = drakvuf_get_kernel_base(drakvuf);
@@ -308,21 +322,27 @@ syscalls::syscalls(drakvuf_t drakvuf, const syscalls_config* c, output_format_t 
 
     if ( c->syscalls_filter_file )
         this->filter = read_syscalls_filter(c->syscalls_filter_file);
-    if ( c->win32k_profile )
-        this->win32k_json = json_object_from_file(c->win32k_profile);
 
     if ( this->os == VMI_OS_WINDOWS )
-        setup_windows(drakvuf, this);
+        setup_windows(drakvuf, this, c);
     else
         setup_linux(drakvuf, this);
 }
 
 syscalls::~syscalls()
 {
+    GSList* loop = this->strings_to_free;
+    while (loop)
+    {
+        g_free(loop->data);
+        loop = loop->next;
+    }
+    g_slist_free(this->strings_to_free);
+
     // NOTE Non "pluginex" support for linux
     if ( this->os != VMI_OS_WINDOWS )
     {
-        GSList* loop = this->traps;
+        loop = this->traps;
         while (loop)
         {
             free_trap(loop->data);
@@ -331,10 +351,9 @@ syscalls::~syscalls()
         g_slist_free(this->traps);
     }
 
+
     if ( this->filter )
         g_hash_table_destroy(this->filter);
 
     g_free(this->offsets);
-
-    json_object_put(this->win32k_json);
 }
