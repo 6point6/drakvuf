@@ -2013,7 +2013,7 @@ bool init_vmi(drakvuf_t drakvuf, bool fast_singlestep)
     if (!altp2m)
         return 0;
 
-    altp2m = vmi_slat_state(drakvuf->vmi, 1) == VMI_SUCCESS;
+    altp2m = vmi_slat_state(drakvuf->vmi, true) == VMI_SUCCESS;
     PRINT_DEBUG("Altp2m enabled: %i\n", altp2m);
     if (!altp2m)
         return 0;
