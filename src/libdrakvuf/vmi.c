@@ -1996,7 +1996,7 @@ void close_vmi(drakvuf_t drakvuf)
             fprintf(stderr, "Altp2m view R %u destruction failed\n", drakvuf->altp2m_idr);
         if (drakvuf->altp2m_idrx && VMI_FAILURE == vmi_slat_destroy(drakvuf->vmi, drakvuf->altp2m_idrx))
             fprintf(stderr, "Altp2m view RX %u destruction failed\n", drakvuf->altp2m_idrx);
-        if (VMI_FAILURE == vmi_slat_state(drakvuf->vmi, false))
+        if (VMI_FAILURE == vmi_slat_set_domain_state(drakvuf->vmi, false))
             fprintf(stderr, "Failed to disable alternate SLAT\n");
 
         // clear the generic mem_event to speed up shutdown
