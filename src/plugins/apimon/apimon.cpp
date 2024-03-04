@@ -193,31 +193,42 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
         keyval("Extra", fmt_extra)
     );
 
+}
+
+event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* info)
+{
+    auto params = libhook::GetTrapParams<ApimonReturnHookData>(info);
+
+    if (!params->verifyResultCallParams(drakvuf, info))
+        return VMI_EVENT_RESPONSE_NONE;
+
+    usermode_print(info, params->arguments, params->target);
+
        /**### Explaination of PoC
      * @win-usermode-poc
-     * 
-     * 
+     *
+     *
      * Modify username value of (_USER_INFO_3) struct when
      * NetUserGetInfo function is called on Windows 10.
-     * 
+     *
      * Idea:
-     * 
+     *
      * 1. When NetUserGetInfo() is called, read memory
      *    address of (*bufptr) and store the value
      * 2. Read the memory address that points to (_USER_INFO_3)
      * 3. Read the memory address that points to (usri3_name)
      * 4. Replace the original usri3_name value with fake data
      * 5. Return the function with the modified buffer
-     * 
+     *
      * Windows functions
-     * 
+     *
      *  NET_API_STATUS NET_API_FUNCTION NetUserGetInfo(
      *       [in]  LPCWSTR servername,
      *       [in]  LPCWSTR username,
      *       [in]  DWORD   level,  // default is 3 (_USER_INFO_3)
-     *       [out] LPBYTE  *bufptr // pointer to struct 
+     *       [out] LPBYTE  *bufptr // pointer to struct
      *  );
-     * 
+     *
      *  typedef struct _USER_INFO_3 {
      *      LPWSTR usri3_name;    // pointer
      *      LPWSTR usri3_password;
@@ -230,15 +241,18 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
     {
         std::cout << "Hit NetUserGetInfo function" << "\n";
 
+    // Get the data from the trap
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+
         // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = ret_target->arguments;
+        std::vector<uint64_t> temp_args = data->arguments;
 
         // Print the address of the 4th arg
         std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
 
         //int some_addr = temp_args[3];
-        vmi_pid_t curr_pid = ret_target->pid;
-        
+        vmi_pid_t curr_pid = data->target->pid;
+
         // Store address of bufptr
         addr_t bufptr = temp_args[3];
         // Store address of User_Info_3 struct
@@ -248,7 +262,7 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
 
         // Initiate access to vmi
         vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-        
+
         // Read address at pointer (arg3)
         if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3))
         {
@@ -284,7 +298,7 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
             }
 
             std::cout << "Replaced username with 'Batman' !" << "\n";
-            
+
         } else if (temp_args[2] == 2)
         {
             std::cout << "Found: USER_INFO_2 struct!" << "\n";
@@ -306,7 +320,7 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
     }
 
     // Manipulate HTTPS file downloads by hooking the
-    // ncrypt.dll!SslDecryptPacket function. Only 
+    // ncrypt.dll!SslDecryptPacket function. Only
     // tested with powershell Invoke-WebRequestcmd
     if (!strcmp(info->trap->name, "SslDecryptPacket"))
     {
@@ -314,9 +328,12 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
 
         // Initiate access to vmi
         vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-        
+
+        // Get the data from the trap
+        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+
         // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = ret_target->arguments;
+        std::vector<uint64_t> temp_args = data->arguments;
 
         // Get PID of process
         vmi_pid_t curr_pid = info->attached_proc_data.pid;
@@ -357,7 +374,7 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
 
         addr_t pBuffer_http_body = pbOutput + (cbOutput - 31);
 
-        // Modify decrypted HTTPS buffer 
+        // Modify decrypted HTTPS buffer
          for (uint8_t byte : poc_string)
         {
             if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pBuffer_http_body, curr_pid, &byte))
@@ -366,22 +383,13 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
                 // add a break on failure
             }
             pBuffer_http_body++; // move address 1 byte
-        } 
+        }
 
         drakvuf_resume(drakvuf);
 
     }
 
     ////////////////////////////////// END
-
-event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* info)
-{
-    auto params = libhook::GetTrapParams<ApimonReturnHookData>(info);
-
-    if (!params->verifyResultCallParams(drakvuf, info))
-        return VMI_EVENT_RESPONSE_NONE;
-
-    usermode_print(info, params->arguments, params->target);
 
     uint64_t hookID = make_hook_id(info);
     ret_hooks.erase(hookID);
@@ -405,13 +413,13 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
 
     addr_t ret_addr = drakvuf_get_function_return_address(drakvuf, info);
 
- // Fake Privilege escalation by changing the SID 
+ // Fake Privilege escalation by changing the SID
     // of the LookupAccountSidW function. Only works
     // with the whoami.exe /user command.
     if (!strcmp(info->trap->name, "LookupAccountSidW"))
     {
         std::cout << "Hit LookupAccountSidW function!" << "\n";
-        
+
         // Get PID of process
         vmi_pid_t curr_pid = info->attached_proc_data.pid;
 
@@ -422,7 +430,7 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
 
         // REAL System user SID
         // 01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00
-        
+
         // Modify input argument 2
         for (uint8_t byte : fake_SID)
         {
@@ -435,7 +443,7 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
         }
 
     }
-    
+
     ////////////// END /////////////
 
     if (!ret_addr)
