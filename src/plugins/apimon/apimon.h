@@ -128,6 +128,12 @@ struct apimon_module
     size_t size;
 };
 
+struct ApimonReturnHookData : PluginResult //Moved here from the CPP
+{
+    std::vector<uint64_t> arguments;
+    hook_target_entry_t* target = nullptr;
+};
+
 class apimon: public pluginex
 {
 public:

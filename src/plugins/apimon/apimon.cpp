@@ -110,16 +110,17 @@
 #include "plugins/output_format.h"
 #include "apimon.h"
 #include "crypto.h"
+#include "deceptions.h" // Deception code
 
 
 namespace
 {
 
-struct ApimonReturnHookData : PluginResult
-{
-    std::vector<uint64_t> arguments;
-    hook_target_entry_t* target = nullptr;
-};
+// struct ApimonReturnHookData : PluginResult
+// {
+//     std::vector<uint64_t> arguments;
+//     hook_target_entry_t* target = nullptr;
+// };
 
 };
 
@@ -241,8 +242,8 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     {
         std::cout << "Hit NetUserGetInfo function" << "\n";
 
-    // Get the data from the trap
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+        // Get the data from the trap
+        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
 
         // Store all the arguments passed by the function
         std::vector<uint64_t> temp_args = data->arguments;
@@ -305,6 +306,16 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         } else {
             std::cout << "Unsupported USER_INFO_X struct!" << "\n";
         }
+
+    }
+
+    if (!strcmp(info->trap->name, "NtCreateFile"))
+    {
+        std::cout << "Hit NtCreateFile function!" << "\n"; // Remove once completed debugging. Probably huge perf impact.
+        
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+        
+        dcpNtCreateFile(vmi, info);
 
     }
 
