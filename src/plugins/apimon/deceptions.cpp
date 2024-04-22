@@ -11,10 +11,10 @@
 #include <stdexcept>
 #include <inttypes.h>
 #include <assert.h>
-
 #include "plugins/output_format.h"
-#include "apimon.h"
-#include "crypto.h" 
+#include "apimon.h" 
+#include <string>
+#include <cstring>
 
 void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {  
 
@@ -26,21 +26,28 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     std::vector<uint64_t> temp_args = data->arguments;
 
     //Store the values we need
-    uint64_t access_mask = temp_args[1]; // Not currently using but can do something to only hit writes
-    addr_t obj_attr = temp_args[2]; // This +0x10 is the UNICODE_STRING we're looking for
-    vmi_pid_t curr_pid = info->attached_proc_data.pid; // Identify the malicious PID
+    //uint64_t access_mask = temp_args[1]; // Not currently using but can do something to only hit writes
+    addr_t obj_addr = temp_args[2]; 
+    vmi_pid_t curr_pid = info->attached_proc_data.pid; 
+    const char* process_name = info->attached_proc_data.name;
 
     // Extract the target filename
-    addr_t filename_addr = obj_attr + 0x10;
-    unicode_string_t* target_filename = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
+    addr_t filename_addr = obj_addr + 0x10;
+    std::cout << "Obj Attr Address: " << obj_addr << ". Unicode String Address: " << filename_addr << "\n";
+    
+    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
+    std::string target_filename = convertToUTF8(target_filename_ustr);
 
     // Print the file handle requested to screen.
-    std::cout << "File Handle Requested for " << target_filename->encoding << "\n"; // Remove once done debugging.
+    std::cout << "File Handle Requested for " << target_filename << "\n"; // Remove once done debugging.
 
+    // const char* mbrPath = {};
+    const char* mbr_path = "\\\\.\\PhysicalDrive0";
+    
     // Catch and neutralise attempts to write to the MBR
-    if (!strcmp(target_filename->encoding, "\\\\.\\PhysicalDrive0")) // FUTURE: Replace this with config lookup
+    if (target_filename == mbr_path) // FUTURE: Replace this with config lookup
     {
-        std::cout << "Identified attempted MBR overwrite by PID " << curr_pid << "\n";
+        std::cout << "WARNING!! Attempted MBR overwrite by " << process_name << " (PID: " << curr_pid << ")" << "\n";
         
         unsigned long target_vcpu = info->vcpu;
 
@@ -54,6 +61,16 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
         }
     }
 
+}
+
+
+std::string convertToUTF8(const unicode_string_t* ustr) {
+    if (strcmp(ustr->encoding, "UTF-8") == 0) {
+        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
+    } else {
+        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
+        return "";
+    }
 }
 
 
