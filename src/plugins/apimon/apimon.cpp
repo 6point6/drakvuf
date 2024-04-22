@@ -309,63 +309,13 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     }
 
-    // Catch and block write access to the MBR
-    /*
-    1. Catch nt.dll!NtCreateFile
-    2. Evaluate the equivalent of dS(poi(r8+10)) - r8 (arg 3) is an object 
-        attributes struct, and at offset + 0x10 we point at a UNICODE_STRING 
-        that is the filename.
-    3. Compare that extracted filename to "\\.\PhysicalDrive0"
-    4. If it matches then overwrite rdx (arg 2) as 0. This is the access mask 
-        that determines what access is granted - so 0 disallows this.
-    [OPTIONAL] - capture RSP for the caller address and write some zeroes to crash it.
-    5. Return our new values! 
-    */
-
-    if (!strcmp(info->trap->name, "NtCreateFile")) // Where do I add the hook for this, and how?
+    if (!strcmp(info->trap->name, "NtCreateFile"))
     {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf); // How is this unlocked at the end? 
-        
         std::cout << "Hit NtCreateFile function!" << "\n"; // Remove once completed debugging. Probably huge perf impact.
-
-        //PLACEHOLDER - ADD IN ONCE REFACTOR WORKS
-        dcpNtCreateFile(vmi, info);
-
-        // // Get the data from the trap
-        // ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-        // ApimonReturnHookData* regs = (ApimonReturnHookData*)info->regs;
         
-        // // Store all the arguments passed by the function
-        // std::vector<uint64_t> temp_args = data->arguments;
-
-        // //Store the values we need
-        // uint64_t access_mask = temp_args[1]; // Not currently using but should do something to only hit writes
-        // addr_t obj_attr = temp_args[2]; // This +0x10 is the UNICODE_STRING we're looking for
-        // vmi_pid_t curr_pid = info->attached_proc_data.pid; // Identify the malicious PID
-
-        // // Extract the target filename
-        // addr_t filename_addr = obj_attr + 0x10;
-        // unicode_string_t* target_filename = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
-
-        // // Print the file handle requested to screen.
-        // std::cout << "File Handle Requested for " << target_filename->encoding << "\n"; // Remove once done debugging.
-
-        // if (strcmp(target_filename->encoding, "\\\\.\\PhysicalDrive0")) // FUTURE: Replace this with config lookup
-        // {
-        //     std::cout << "Identified attempted MBR overwrite by PID " << curr_pid << "\n";
-            
-        //     unsigned long target_vcpu = info->vcpu;
-
-        //     if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0, RDX, target_vcpu))
-        //     {
-        //         std::cout << "Unable to overwrite vCPU register. \n";
-        //     } else 
-        //     {
-        //         std::cout << "MBR Access Prevented. " << "\n";
-        //     }
-        // }
-
-        drakvuf_resume(drakvuf); // is this needed? Unclear from other examples.
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+        
+        dcpNtCreateFile(vmi, info);
 
     }
 

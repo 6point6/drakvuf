@@ -38,7 +38,7 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     std::cout << "File Handle Requested for " << target_filename->encoding << "\n"; // Remove once done debugging.
 
     // Catch and neutralise attempts to write to the MBR
-    if (strcmp(target_filename->encoding, "\\\\.\\PhysicalDrive0")) // FUTURE: Replace this with config lookup
+    if (!strcmp(target_filename->encoding, "\\\\.\\PhysicalDrive0")) // FUTURE: Replace this with config lookup
     {
         std::cout << "Identified attempted MBR overwrite by PID " << curr_pid << "\n";
         
