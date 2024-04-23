@@ -33,8 +33,12 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     addr_t filename_addr = obj_addr + 0x10;
     
     std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n";
-
+    std::cout << "Memory Location to Read: " << filename_addr << "\n";
+    
     unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
+
+    std::cout << "Target Filename USTR: " << target_filename_ustr << "\n";
+
     std::string target_filename = convertToUTF8(target_filename_ustr);
 
     // Print the file handle requested to screen.
