@@ -18,9 +18,8 @@
 
 void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {  
 
-    // Get the data from the trap
+    // Get the data from the trap       
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-    // ApimonReturnHookData* regs = (ApimonReturnHookData*)info->regs;
 
     // Store all the arguments passed by the function
     std::vector<uint64_t> temp_args = data->arguments;
@@ -32,8 +31,9 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
 
     // Extract the target filename
     addr_t filename_addr = obj_addr + 0x10;
-    std::cout << "Obj Attr Address: " << obj_addr << ". Unicode String Address: " << filename_addr << "\n";
     
+    std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n";
+
     unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
     std::string target_filename = convertToUTF8(target_filename_ustr);
 
@@ -49,33 +49,24 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     {
         std::cout << "WARNING!! Attempted MBR overwrite by " << process_name << " (PID: " << curr_pid << ")" << "\n";
         
-    //     unsigned long target_vcpu = info->vcpu;
-    //     std::cout << "Hit NtCreateFile function! 7" << "\n";
-    //     if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0, RDX, target_vcpu))
-    //     {
-    //         std::cout << "Unable to overwrite vCPU register. \n";
-    //     } 
-    //     else 
-    //     {
-    //         std::cout << "MBR Access Prevented. " << "\n";
-    //     }
-    // }
+        unsigned long target_vcpu = info->vcpu;
 
-}
-
-
-std::string convertToUTF8(const unicode_string_t* ustr) {
-    if (strcmp(ustr->encoding, "UTF-8") == 0) {
-        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
-    } else {
-        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
-        return "";
+        if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0, RDX, target_vcpu))
+        {
+            std::cout << "Unable to overwrite vCPU register. \n";
+        } 
+        else 
+        {
+            std::cout << "MBR Access Prevented. " << "\n";
+        }
     }
+
 }
 
 
 std::string convertToUTF8(const unicode_string_t* ustr) {
     if (strcmp(ustr->encoding, "UTF-8") == 0) {
+
         return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
     } else {
         std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
