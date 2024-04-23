@@ -26,7 +26,6 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     std::vector<uint64_t> temp_args = data->arguments;
 
     //Store the values we need
-    //uint64_t access_mask = temp_args[1]; // Not currently using but can do something to only hit writes
     addr_t obj_addr = temp_args[2]; 
     vmi_pid_t curr_pid = info->attached_proc_data.pid; 
     const char* process_name = info->attached_proc_data.name;
@@ -41,8 +40,9 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     // Print the file handle requested to screen.
     std::cout << "File Handle Requested for " << target_filename << "\n"; // Remove once done debugging.
 
-    // const char* mbrPath = {};
     const char* mbr_path = "\\\\.\\PhysicalDrive0";
+
+    std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
     
     // Catch and neutralise attempts to write to the MBR
     if (target_filename == mbr_path) // FUTURE: Replace this with config lookup
