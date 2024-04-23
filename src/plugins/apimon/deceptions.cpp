@@ -16,6 +16,18 @@
 #include <string>
 #include <cstring>
 
+
+std::string convertToUTF8(const unicode_string_t* ustr) {
+    if (strcmp(ustr->encoding, "UTF-8") == 0) {
+
+        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
+    } else {
+        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
+        return "";
+    }
+}
+
+
 void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {  
 
     // Get the data from the trap       
@@ -68,14 +80,6 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
 }
 
 
-std::string convertToUTF8(const unicode_string_t* ustr) {
-    if (strcmp(ustr->encoding, "UTF-8") == 0) {
 
-        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
-    } else {
-        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
-        return "";
-    }
-}
 
 
