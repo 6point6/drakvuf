@@ -21,6 +21,6 @@
 #include "apimon.h"
 
 std::string convertToUTF8(const unicode_string_t* ustr);
-void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info);
+void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info);
 
 #endif
