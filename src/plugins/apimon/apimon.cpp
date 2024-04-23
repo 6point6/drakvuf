@@ -404,117 +404,117 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
 //// Changing the first file
 
-    if (!strcmp(info->trap->name, "FindFirstFileA"))
-    {
-        std::cout << "Hit FindFirstFileA function!" << "\n";
+    // if (!strcmp(info->trap->name, "FindFirstFileA"))
+    // {
+    //     std::cout << "Hit FindFirstFileA function!" << "\n";
 
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+    //     // Initiate access to vmi
+    //     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
 
-        // Get the data from the trap
-        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+    //     // Get the data from the trap
+    //     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
 
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
+    //     // Store all the arguments passed by the function
+    //     std::vector<uint64_t> temp_args = data->arguments;
 
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
+    //     // Get PID of process
+    //     vmi_pid_t curr_pid = info->attached_proc_data.pid;
 
-        // Address of the 2nd arg
-        addr_t lpFindFileData = temp_args[1];
-        std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
+    //     // Address of the 2nd arg
+    //     addr_t lpFindFileData = temp_args[1];
+    //     std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
 
-        // Declare address store for Win32_Find_Data struct
-        uint64_t Win32_Find_Data = 0;
+    //     // Declare address store for Win32_Find_Data struct
+    //     uint64_t Win32_Find_Data = 0;
 
-        // Read address at pointer (arg2)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
-        Print address of Win32_Find_Data
-        std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
+    //     // Read address at pointer (arg2)
+    //     if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
+    //     {
+    //         std::cout << "Error occured 1" << "\n";
+    //     }
+    //     // Print address of Win32_Find_Data
+    //     std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
 
-        // Declare address store for cFileName
-        uint32_t cFileName = 0;
+    //     // Declare address store for cFileName
+    //     uint32_t cFileName = 0;
 
-        // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
+    //     // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
+    //     if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
+    //     {
+    //         std::cout << "Error occured 1" << "\n";
+    //     }
 
-        // Print address of cFileName
-        std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
+    //     // Print address of cFileName
+    //     std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
 
-        // Replace My_secrets.zip with Test_File2.txt
-        uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0};
+    //     // Replace My_secrets.zip with Test_File2.txt
+    //     uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0};
 
-        for (uint8_t byte : fake_filename)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            cFileName++; // move address 1 byte
-            }
+    //     for (uint8_t byte : fake_filename)
+    //     {
+    //         if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
+    //             std::cout << "Writing to mem failed!" << "\n";
+    //             // add a break on failure
+    //         }
+    //         cFileName++; // move address 1 byte
+    //         }
 
 //// Changing subsequent files
 
-    if (!strcmp(info->trap->name, "FindNextFileA"))
-    {
-        std::cout << "Hit FindNextFileA function!" << "\n";
+    // if (!strcmp(info->trap->name, "FindNextFileA"))
+    // {
+    //     std::cout << "Hit FindNextFileA function!" << "\n";
 
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+    //     // Initiate access to vmi
+    //     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
 
-        // Get the data from the trap
-        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+    //     // Get the data from the trap
+    //     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
 
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
+    //     // Store all the arguments passed by the function
+    //     std::vector<uint64_t> temp_args = data->arguments;
 
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
+    //     // Get PID of process
+    //     vmi_pid_t curr_pid = info->attached_proc_data.pid;
 
-        // Address of the 2nd arg
-        addr_t lpFindFileData = temp_args[1];
-        std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
+    //     // Address of the 2nd arg
+    //     addr_t lpFindFileData = temp_args[1];
+    //     std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
 
-        // Declare address store for Win32_Find_Data struct
-        uint64_t Win32_Find_Data = 0;
+    //     // Declare address store for Win32_Find_Data struct
+    //     uint64_t Win32_Find_Data = 0;
 
-        // Read address at pointer (arg2)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
-        Print address of Win32_Find_Data
-        std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
+    //     // Read address at pointer (arg2)
+    //     if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
+    //     {
+    //         std::cout << "Error occured 1" << "\n";
+    //     }
+    //     // Print address of Win32_Find_Data
+    //     std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
 
-        // Declare address store for cFileName
-        uint32_t cFileName = 0;
+    //     // Declare address store for cFileName
+    //     uint32_t cFileName = 0;
 
-        // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
+    //     // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
+    //     if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
+    //     {
+    //         std::cout << "Error occured 1" << "\n";
+    //     }
 
-        // Print address of cFileName
-        std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
+    //     // Print address of cFileName
+    //     std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
 
-        // Replace Secret_Folder with Boring_Folder
-        uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114};
+    //     // Replace Secret_Folder with Boring_Folder
+    //     uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114};
 
-        for (uint8_t byte : fake_filename)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            cFileName++; // move address 1 byte
-            }
+    //     for (uint8_t byte : fake_filename)
+    //     {
+    //         if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
+    //             std::cout << "Writing to mem failed!" << "\n";
+    //             // add a break on failure
+    //         }
+    //         cFileName++; // move address 1 byte
+    //         }
 
 // --------- END ------------
 
