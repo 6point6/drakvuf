@@ -19,7 +19,15 @@
 #include <libusermode/userhook.hpp>
 #include "plugins/plugins_ex.h"
 #include "apimon.h"
+#include <libvmi/libvmi.h>
 
-void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info);
+std::string convert_to_utf_8(const unicode_string_t* ustr);
+
+void deception_nt_create_file(vmi_instance_t vmi, drakvuf_trap_info* info);
+void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info);
+void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info);
+void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info);
+void deception_ssl_decrypt_packet(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
+void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename);
 
 #endif
