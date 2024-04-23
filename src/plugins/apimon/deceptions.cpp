@@ -16,7 +16,21 @@
 #include <string>
 #include <cstring>
 
-void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {  
+
+std::string convertToUTF8(const unicode_string_t* ustr) {
+    if (strcmp(ustr->encoding, "UTF-8") == 0) {
+
+        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
+    } else {
+        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
+        return "";
+    }
+}
+
+
+void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
+
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
 
     // Get the data from the trap       
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
@@ -34,6 +48,17 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
     
     std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n";
     std::cout << "Memory Location to Read: " << filename_addr << "\n";
+
+    drakvuf_pause(drakvuf);
+
+    uint64_t rawmem = 0;
+
+    if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)filename_addr, curr_pid, &rawmem))
+        {
+            std::cout << "Unable to read memory." << "\n";
+        }
+    
+    std::cout << "rawmem: 0x" << std::hex << rawmem << "\n";
     
     unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
 
@@ -65,17 +90,8 @@ void dcpNtCreateFile(vmi_instance_t vmi, drakvuf_trap_info* info) {
         }
     }
 
-}
+    drakvuf_resume(drakvuf);
 
-
-std::string convertToUTF8(const unicode_string_t* ustr) {
-    if (strcmp(ustr->encoding, "UTF-8") == 0) {
-
-        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
-    } else {
-        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
-        return "";
-    }
 }
 
 

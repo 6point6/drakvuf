@@ -311,11 +311,8 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     if (!strcmp(info->trap->name, "NtCreateFile"))
     {
-        std::cout << "Hit NtCreateFile function!" << "\n"; // Remove once completed debugging. Probably huge perf impact.
-        
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-        
-        dcpNtCreateFile(vmi, info);
+        std::cout << "Hit NtCreateFile function!" << "\n"; // Remove once completed debugging. Probably huge perf impact.      
+        dcpNtCreateFile(drakvuf, info);
 
     }
 
