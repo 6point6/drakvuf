@@ -17,38 +17,61 @@
 #include <string>
 #include <cstring>
 
+
 std::string convert_to_utf_8(const unicode_string_t* ustr) {
-    std::cout << "something happening here\n";
-    try
-    {
+    if (strcmp(ustr->encoding, "UTF-16") == 0) {
+
         return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
+    } else {
+        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
+        return "";
     }
-    catch (const std::exception& e) 
-    {
-        std::cout << "ERROROROROROR\n";
-        std::cout << e.what();
-    }
-    catch (const std::runtime_error& e)
-    {
-        std::cout << "ERROROROROROR2\n";
-        std::cout << e.what();   
-    } 
-    return "";
 }
 
-void deception_nt_create_file(vmi_instance_t vmi, drakvuf_trap_info* info) {  
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
-    addr_t obj_addr = temp_args[2]; //Store the values we need
-    addr_t filename_addr = obj_addr + 0x10; // Extract the target filename
-    vmi_pid_t curr_pid = info->attached_proc_data.pid;
+
+void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
+
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+   
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+    std::vector<uint64_t> temp_args = data->arguments;
+
+    //Store the values we need
+    addr_t p_obj_attributes_struct = temp_args[2]; 
+    vmi_pid_t curr_pid = info->attached_proc_data.pid; 
     const char* process_name = info->attached_proc_data.name;
-    const char* mbr_path = "\\\\.\\PhysicalDrive0";
-    std::cout << "Obj Attr Address: " << obj_addr << ". Unicode String Address: " << filename_addr << "\n";
-    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
-    std::string target_filename = convert_to_utf_8(target_filename_ustr);
-    std::cout << "File Handle Requested for " << target_filename << "\n"; // Remove once done debugging.
-    std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
+    
+    //std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n"; // Remove outside of debugging and demos.
+    
+    addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
+
+    drakvuf_pause(drakvuf);
+
+    uint64_t obj_name_ustr_ptr = 0;
+
+    if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
+        {
+            std::cout << "Unable to read from Object Attributes." << "\n";
+        }
+    
+    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
+
+    std::string target_filename;
+
+    if (target_filename_ustr != NULL) 
+    {
+        target_filename = convert_to_utf_8(target_filename_ustr);
+    }
+    else 
+    {
+        target_filename = "";   
+    }
+
+    std::cout << "File Handle Requested for " << target_filename << "\n"; // Enable for demos/debug only.
+
+    const char* mbr_path = "\\??\\PhysicalDrive0"; //FUTURE: This wants to be some list of target files to protect. (\\.\PhysicalDrive0 is actual)
+
+    //std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
     
     // Catch and neutralise attempts to write to the MBR
     if (target_filename == mbr_path) // FUTURE: Replace this with config lookup
@@ -64,7 +87,7 @@ void deception_nt_create_file(vmi_instance_t vmi, drakvuf_trap_info* info) {
             std::cout << "MBR Access Prevented. " << "\n";
         }
     }
-
+    drakvuf_resume(drakvuf);
 }
 
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
