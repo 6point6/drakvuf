@@ -211,3 +211,10 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
         cFileName++; // move address 1 byte
     }
 }
+
+void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info) {
+    std::cout << "Something\n";
+    addr_t rdx = info->regs->rdx;
+
+    std::cout << rdx << "\n";
+}

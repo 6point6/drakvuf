@@ -221,6 +221,8 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     } else if(!strcmp(info->trap->name, "FindNextFileA")) {
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+    } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
+        deception_bcrypt_decrypt(vmi, info);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
