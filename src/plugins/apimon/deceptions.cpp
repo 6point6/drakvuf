@@ -11,14 +11,14 @@
 #include <stdexcept>
 #include <inttypes.h>
 #include <assert.h>
-#include "plugins/output_format.h"
+/*#include "plugins/output_format.h"*/
 #include "apimon.h" 
 #include <string>
 #include <cstring>
 
 
 std::string convertToUTF8(const unicode_string_t* ustr) {
-    if (strcmp(ustr->encoding, "UTF-8") == 0) {
+    if (strcmp(ustr->encoding, "UTF-16") == 0) {
 
         return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
     } else {
@@ -31,47 +31,46 @@ std::string convertToUTF8(const unicode_string_t* ustr) {
 void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
 
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-    // Get the data from the trap       
+   
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-    // Store all the arguments passed by the function
     std::vector<uint64_t> temp_args = data->arguments;
 
     //Store the values we need
-    addr_t obj_addr = temp_args[2]; 
+    addr_t p_obj_attributes_struct = temp_args[2]; 
     vmi_pid_t curr_pid = info->attached_proc_data.pid; 
     const char* process_name = info->attached_proc_data.name;
-
-    // Extract the target filename
-    addr_t filename_addr = obj_addr + 0x10;
     
-    std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n";
-    std::cout << "Memory Location to Read: " << filename_addr << "\n";
+    //std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n"; // Remove outside of debugging and demos.
+    
+    addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
 
     drakvuf_pause(drakvuf);
 
-    uint64_t rawmem = 0;
+    uint64_t obj_name_ustr_ptr = 0;
 
-    if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)filename_addr, curr_pid, &rawmem))
+    if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
         {
-            std::cout << "Unable to read memory." << "\n";
+            std::cout << "Unable to read from Object Attributes." << "\n";
         }
     
-    std::cout << "rawmem: 0x" << std::hex << rawmem << "\n";
-    
-    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, filename_addr, curr_pid);
+    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
 
-    std::cout << "Target Filename USTR: " << target_filename_ustr << "\n";
+    std::string target_filename;
 
-    std::string target_filename = convertToUTF8(target_filename_ustr);
+    if (target_filename_ustr != NULL) 
+    {
+        target_filename = convertToUTF8(target_filename_ustr);
+    }
+    else 
+    {
+        target_filename = "";   
+    }
 
-    // Print the file handle requested to screen.
-    std::cout << "File Handle Requested for " << target_filename << "\n"; // Remove once done debugging.
+    //std::cout << "File Handle Requested for " << target_filename << "\n"; // Enable for demos only.
 
     const char* mbr_path = "\\\\.\\PhysicalDrive0";
 
-    std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
+    //std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
     
     // Catch and neutralise attempts to write to the MBR
     if (target_filename == mbr_path) // FUTURE: Replace this with config lookup

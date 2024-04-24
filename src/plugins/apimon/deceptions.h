@@ -14,7 +14,6 @@
 #include <memory>
 #include <unordered_map>
 #include <optional>
-
 #include <glib.h>
 #include <libusermode/userhook.hpp>
 #include "plugins/plugins_ex.h"
