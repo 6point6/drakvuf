@@ -203,24 +203,36 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         return VMI_EVENT_RESPONSE_NONE;
 
     /* Start: Custom Deception Code */
-    std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact.
-    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+    std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact. 
+    
     if (!strcmp(info->trap->name, "NtCreateFile")) {
-        deception_nt_create_file(vmi, info);
+        deception_nt_create_file(drakvuf, info);
+
     } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_net_user_get_info(vmi, info);
+
     } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_lookup_account_sid_w(vmi, info);
+
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
+
     } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
+
     } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+
     } else if(!strcmp(info->trap->name, "FindNextFileA")) {
+        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
@@ -341,12 +353,13 @@ static void on_dll_discovered(drakvuf_t drakvuf, const std::string& dll_name, co
         vmi_dtb_to_pid(vmi, dll->dtb, &pid);
     }
 
-    fmt::print(plugin->m_output_format, "apimon", drakvuf, nullptr,
-        keyval("Event", fmt::Rstr("dll_discovered")),
-        keyval("DllName", fmt::Estr(dll_name)),
-        keyval("DllBase", fmt::Xval(dll->real_dll_base)),
-        keyval("PID", fmt::Nval(pid))
-    );
+    // Commenting out this block as it overwhelms the console making it hard to do much else. 
+    // fmt::print(plugin->m_output_format, "apimon", drakvuf, nullptr,
+    //     keyval("Event", fmt::Rstr("dll_discovered")),
+    //     keyval("DllName", fmt::Estr(dll_name)),
+    //     keyval("DllBase", fmt::Xval(dll->real_dll_base)),
+    //     keyval("PID", fmt::Nval(pid))
+    // );
 
     plugin->wanted_hooks.visit_hooks_for(dll_name, [&](const auto& e)
     {

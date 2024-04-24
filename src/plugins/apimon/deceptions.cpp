@@ -18,7 +18,7 @@
 #include <cstring>
 
 
-std::string convertToUTF8(const unicode_string_t* ustr) {
+std::string convert_to_utf_8(const unicode_string_t* ustr) {
     if (strcmp(ustr->encoding, "UTF-16") == 0) {
 
         return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
@@ -29,7 +29,7 @@ std::string convertToUTF8(const unicode_string_t* ustr) {
 }
 
 
-void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
+void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
 
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
    
@@ -60,16 +60,16 @@ void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info) {
 
     if (target_filename_ustr != NULL) 
     {
-        target_filename = convertToUTF8(target_filename_ustr);
+        target_filename = convert_to_utf_8(target_filename_ustr);
     }
     else 
     {
         target_filename = "";   
     }
 
-    //std::cout << "File Handle Requested for " << target_filename << "\n"; // Enable for demos only.
+    std::cout << "File Handle Requested for " << target_filename << "\n"; // Enable for demos/debug only.
 
-    const char* mbr_path = "\\\\.\\PhysicalDrive0";
+    const char* mbr_path = "\\??\\PhysicalDrive0"; //FUTURE: This wants to be some list of target files to protect. (\\.\PhysicalDrive0 is actual)
 
     //std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
     
@@ -87,7 +87,7 @@ void dcpNtCreateFile(drakvuf_t drakvuf, drakvuf_trap_info* info) {
             std::cout << "MBR Access Prevented. " << "\n";
         }
     }
-
+    drakvuf_resume(drakvuf);
 }
 
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
