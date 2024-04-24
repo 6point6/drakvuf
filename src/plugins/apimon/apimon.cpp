@@ -199,327 +199,36 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
 event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* info)
 {
     auto params = libhook::GetTrapParams<ApimonReturnHookData>(info);
-
     if (!params->verifyResultCallParams(drakvuf, info))
         return VMI_EVENT_RESPONSE_NONE;
 
-    usermode_print(info, params->arguments, params->target);
-
-       /**### Explaination of PoC
-     * @win-usermode-poc
-     *
-     *
-     * Modify username value of (_USER_INFO_3) struct when
-     * NetUserGetInfo function is called on Windows 10.
-     *
-     * Idea:
-     *
-     * 1. When NetUserGetInfo() is called, read memory
-     *    address of (*bufptr) and store the value
-     * 2. Read the memory address that points to (_USER_INFO_3)
-     * 3. Read the memory address that points to (usri3_name)
-     * 4. Replace the original usri3_name value with fake data
-     * 5. Return the function with the modified buffer
-     *
-     * Windows functions
-     *
-     *  NET_API_STATUS NET_API_FUNCTION NetUserGetInfo(
-     *       [in]  LPCWSTR servername,
-     *       [in]  LPCWSTR username,
-     *       [in]  DWORD   level,  // default is 3 (_USER_INFO_3)
-     *       [out] LPBYTE  *bufptr // pointer to struct
-     *  );
-     *
-     *  typedef struct _USER_INFO_3 {
-     *      LPWSTR usri3_name;    // pointer
-     *      LPWSTR usri3_password;
-     *      DWORD  usri3_password_age;
-     *      ...
-     */
-
-    // Only modify specific functions
-    if (!strcmp(info->trap->name, "NetUserGetInfo"))
-    {
-        std::cout << "Hit NetUserGetInfo function" << "\n";
-
-        // Get the data from the trap
-        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
-
-        // Print the address of the 4th arg
-        std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
-
-        //int some_addr = temp_args[3];
-        vmi_pid_t curr_pid = data->target->pid;
-
-        // Store address of bufptr
-        addr_t bufptr = temp_args[3];
-        // Store address of User_Info_3 struct
-        uint64_t pUserInfo_3 = 0;
-        // Store address of Usri3_name struct
-        uint64_t pUsri3_name = 0;
-
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-        // Read address at pointer (arg3)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
-
-        // Print address of pUserInfo_3
-        std::cout << "pUserInfo_3: 0x" << std::hex << pUserInfo_3 << "\n";
-
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)pUserInfo_3, curr_pid, &pUsri3_name))
-        {
-            std::cout << "Error occured 2" << "\n";
-        }
-        // Print address of pointer to usri3_name
-        std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n";
-
-        if (temp_args[2] == 3)
-        {
-            std::cout << "Found: USER_INFO_3 struct!" << "\n";
-
-            // Replace Tester with Batman
-            // Batman = 42 00 61 00 74 00 6d 00 61 00 6e 00
-            uint8_t fake_user[12] = {66, 0, 97, 0, 116, 0, 109, 0, 97, 0, 110, 0};
-
-            for (uint8_t byte : fake_user)
-            {
-                if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &byte))
-                {
-                    std::cout << "Writing to mem failed!" << "\n";
-                    // add a break on failure
-                }
-                pUsri3_name++; // move address 1 byte
-            }
-
-            std::cout << "Replaced username with 'Batman' !" << "\n";
-
-        } else if (temp_args[2] == 2)
-        {
-            std::cout << "Found: USER_INFO_2 struct!" << "\n";
-        } else {
-            std::cout << "Unsupported USER_INFO_X struct!" << "\n";
-        }
-
+    /* Start: Custom Deception Code */
+    std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact.
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+    if (!strcmp(info->trap->name, "NtCreateFile")) {
+        deception_nt_create_file(vmi, info);
+    } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
+        deception_net_user_get_info(vmi, info);
+    } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
+        deception_lookup_account_sid_w(vmi, info);
+    } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
+        deception_icmp_send_echo_2_ex(drakvuf, info);
+    } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
+        deception_ssl_decrypt_packet(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
+        uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
+        deception_find_first_or_next_file_a(vmi, info, fake_filename);
+    } else if(!strcmp(info->trap->name, "FindNextFileA")) {
+        uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
+        deception_find_first_or_next_file_a(vmi, info, fake_filename);
+    } else {
+        std::cout << "No Handler: " << info->trap->name << "\n";
+        usermode_print(info, params->arguments, params->target);
     }
-
-    if (!strcmp(info->trap->name, "NtCreateFile"))
-    {
-        std::cout << "Hit NtCreateFile function!" << "\n"; // Remove once completed debugging. Probably huge perf impact.      
-        dcpNtCreateFile(drakvuf, info);
-
-    }
-
-    // Pause the guest for 3 seconds
-    if (!strcmp(info->trap->name, "IcmpSendEcho2Ex"))
-    {
-        std::cout << "Hit IcmpSendEcho2Ex function!" << "\n";
-        std::cout << "Pausing guest..." << "\n";
-        drakvuf_pause(drakvuf);
-        sleep(3);
-        drakvuf_resume(drakvuf);
-        std::cout << "Resuming guest..." << "\n";
-    }
-
-    // Manipulate HTTPS file downloads by hooking the
-    // ncrypt.dll!SslDecryptPacket function. Only
-    // tested with powershell Invoke-WebRequestcmd
-    if (!strcmp(info->trap->name, "SslDecryptPacket"))
-    {
-        std::cout << "Hit SslDecryptPacket function!" << "\n";
-
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-        // Get the data from the trap
-        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
-
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-        // Address of 5th arg (A pointer to a buffer to contain the decrypted packet)
-        addr_t pbOutput = temp_args[4]; // OUT
-        std::cout << "pbOutput: 0x" << std::hex << pbOutput << "\n";
-
-        // Address of 6th arg (The length, bytes, of the pbOutput buffer)
-        addr_t cbOutput = (uint32_t)temp_args[5]; // IN GET LOWER PART OF 64 addr
-        std::cout << "Len of pOutput: " << cbOutput << "\n";
-
-        uint64_t decrypted_data_p = 0;
-        //uint64_t decrypted_data = 0;
-        //uint32_t decrypted_data_len = 0;
-
-        drakvuf_pause(drakvuf);
-
-        // Get address of decrypted_data
-        if (VMI_FAILURE == vmi_read_64_va(vmi, pbOutput, curr_pid, &decrypted_data_p))
-        {
-            std::cout << "Error reading pbOutput!" << "\n";
-        }
-
-        // Print actual decrypted_data content
-        std::cout << "decrypted_data: 0x"  << decrypted_data_p << "\n";
-
-        // only supports small TEXT files
-
-        // Replace 10 bytes in the buffer with "__________"
-        uint8_t poc_string[10] = {95,95,95,95,95,95,95,95,95,95};
-
-        // TODO
-        // Search for a double CRLF pattern which
-        // marks the end of the fields section of
-        // a message.
-        //uint8_t pattern[4] = { 13, 10, 13, 10 };
-
-        addr_t pBuffer_http_body = pbOutput + (cbOutput - 31);
-
-        // Modify decrypted HTTPS buffer
-         for (uint8_t byte : poc_string)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pBuffer_http_body, curr_pid, &byte))
-            {
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            pBuffer_http_body++; // move address 1 byte
-        }
-
-        drakvuf_resume(drakvuf);
-
-    }
-
-// ### Change File Name PoC (ASCII-Type)
-
-//// Changing the first file
-
-    // if (!strcmp(info->trap->name, "FindFirstFileA"))
-    // {
-    //     std::cout << "Hit FindFirstFileA function!" << "\n";
-
-    //     // Initiate access to vmi
-    //     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-    //     // Get the data from the trap
-    //     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-    //     // Store all the arguments passed by the function
-    //     std::vector<uint64_t> temp_args = data->arguments;
-
-    //     // Get PID of process
-    //     vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-    //     // Address of the 2nd arg
-    //     addr_t lpFindFileData = temp_args[1];
-    //     std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
-
-    //     // Declare address store for Win32_Find_Data struct
-    //     uint64_t Win32_Find_Data = 0;
-
-    //     // Read address at pointer (arg2)
-    //     if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
-    //     {
-    //         std::cout << "Error occured 1" << "\n";
-    //     }
-    //     // Print address of Win32_Find_Data
-    //     std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
-
-    //     // Declare address store for cFileName
-    //     uint32_t cFileName = 0;
-
-    //     // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
-    //     if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
-    //     {
-    //         std::cout << "Error occured 1" << "\n";
-    //     }
-
-    //     // Print address of cFileName
-    //     std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
-
-    //     // Replace My_secrets.zip with Test_File2.txt
-    //     uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0};
-
-    //     for (uint8_t byte : fake_filename)
-    //     {
-    //         if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
-    //             std::cout << "Writing to mem failed!" << "\n";
-    //             // add a break on failure
-    //         }
-    //         cFileName++; // move address 1 byte
-    //         }
-
-//// Changing subsequent files
-
-    // if (!strcmp(info->trap->name, "FindNextFileA"))
-    // {
-    //     std::cout << "Hit FindNextFileA function!" << "\n";
-
-    //     // Initiate access to vmi
-    //     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-    //     // Get the data from the trap
-    //     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-    //     // Store all the arguments passed by the function
-    //     std::vector<uint64_t> temp_args = data->arguments;
-
-    //     // Get PID of process
-    //     vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-    //     // Address of the 2nd arg
-    //     addr_t lpFindFileData = temp_args[1];
-    //     std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
-
-    //     // Declare address store for Win32_Find_Data struct
-    //     uint64_t Win32_Find_Data = 0;
-
-    //     // Read address at pointer (arg2)
-    //     if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data))
-    //     {
-    //         std::cout << "Error occured 1" << "\n";
-    //     }
-    //     // Print address of Win32_Find_Data
-    //     std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n";
-
-    //     // Declare address store for cFileName
-    //     uint32_t cFileName = 0;
-
-    //     // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
-    //     if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName))
-    //     {
-    //         std::cout << "Error occured 1" << "\n";
-    //     }
-
-    //     // Print address of cFileName
-    //     std::cout << "cFileName: 0x" << std::hex << cFileName << "\n";
-
-    //     // Replace Secret_Folder with Boring_Folder
-    //     uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114};
-
-    //     for (uint8_t byte : fake_filename)
-    //     {
-    //         if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, &byte))
-    //             std::cout << "Writing to mem failed!" << "\n";
-    //             // add a break on failure
-    //         }
-    //         cFileName++; // move address 1 byte
-    //         }
-
-// --------- END ------------
-
-    ////////////////////////////////// END
+    /* End: Custom Deception Code */
 
     uint64_t hookID = make_hook_id(info);
     ret_hooks.erase(hookID);
-
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -538,39 +247,6 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
     vmi_v2pcache_flush(vmi, info->regs->cr3);
 
     addr_t ret_addr = drakvuf_get_function_return_address(drakvuf, info);
-
- // Fake Privilege escalation by changing the SID
-    // of the LookupAccountSidW function. Only works
-    // with the whoami.exe /user command.
-    if (!strcmp(info->trap->name, "LookupAccountSidW"))
-    {
-        std::cout << "Hit LookupAccountSidW function!" << "\n";
-
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-        // Get address of PSID
-        addr_t pSID = info->regs->rdx;
-        // Replace current user SID with system
-        uint8_t fake_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0};
-
-        // REAL System user SID
-        // 01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00
-
-        // Modify input argument 2
-        for (uint8_t byte : fake_SID)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID, curr_pid, &byte))
-            {
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            pSID++; // move address 1 byte
-        }
-
-    }
-
-    ////////////// END /////////////
 
     if (!ret_addr)
     {
