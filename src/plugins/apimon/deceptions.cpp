@@ -29,10 +29,7 @@ std::string convert_to_utf_8(const unicode_string_t* ustr) {
 }
 
 
-void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
-
-    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-   
+void deception_nt_create_file(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {  
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
 
@@ -236,8 +233,14 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
 }
 
 void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info) {
-    std::cout << "Something\n";
-    addr_t rdx = info->regs->rdx;
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> temp_args = data->arguments;
+    if(temp_args[2] != 432) {
+        std::cout << "bcrypt.dll: Not Mimikatz\n";
+        return;
+    }
 
-    std::cout << rdx << "\n";
+    std::cout << "attached_proc.name: " << info->attached_proc_data.name << "\n";
+    std::cout << "trap->name: " << info->trap->name << "\n";
+    std::cout << "proc_data.name: " << info->proc_data.name << "\n";
 }

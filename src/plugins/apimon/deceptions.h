@@ -22,7 +22,7 @@
 
 std::string convert_to_utf_8(const unicode_string_t* ustr);
 
-void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info);
+void deception_nt_create_file(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info);
 void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info);
 void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info);

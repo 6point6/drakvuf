@@ -21,11 +21,18 @@ if meson.get_compiler('cpp').compiles(code) == false
     error('Unsupported C++ compiler, please install clang')
 endif
 
+
+cmake = import('cmake')
+sub_proj = cmake.subproject('redis-plus-plus')
+cm_lib = sub_proj.dependency('redis++')
+
 # Find dependencies
 glib = dependency('glib-2.0')
 libvmi = dependency('libvmi')
 jsonc = dependency('json-c')
-deps = [glib, libvmi, jsonc]
+hiredis = dependency('hiredis')
+
+deps = [glib, libvmi, jsonc, hiredis, cm_lib]
 
 version = meson.project_version()
 if not get_option('release')
