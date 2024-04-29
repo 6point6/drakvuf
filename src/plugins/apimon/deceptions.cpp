@@ -11,83 +11,85 @@
 #include <stdexcept>
 #include <inttypes.h>
 #include <assert.h>
-
-#include "plugins/output_format.h"
-#include "apimon.h" 
+#include <vector>
 #include <string>
 #include <cstring>
+#include <codecvt>
+#include <locale>
+#include "plugins/output_format.h"
+#include "apimon.h" 
+#include <bitset>
+#include <assert.h>
+#include "deception_utils.h"
 
 
-std::string convert_to_utf_8(const unicode_string_t* ustr) {
-    if (strcmp(ustr->encoding, "UTF-16") == 0) {
-
-        return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);
-    } else {
-        std::cerr << "Unsupported encoding: " << ustr->encoding << "\n";
-        return "";
-    }
-}
 
 
-void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info) {  
 
-    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-   
+/// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file. 
+/// This currently is achieved by overwriting the RSP register, resulting a crash of the calling process.
+/// @param drakvuf
+/// @param vmi  
+/// @param info 
+void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect) {  
+
+    drakvuf_pause(drakvuf);         // Move this into apimon so it's consistent? 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
+    uint32_t access_mask = temp_args[1];
 
-    //Store the values we need
-    addr_t p_obj_attributes_struct = temp_args[2]; 
-    vmi_pid_t curr_pid = info->attached_proc_data.pid; 
-    const char* process_name = info->attached_proc_data.name;
-    
-    //std::cout << "NtCreateFile called by " << process_name << " (PID: " << curr_pid << ")" << "\n"; // Remove outside of debugging and demos.
-    
-    addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
+    if (has_any_flag(access_mask, (enum_mask_value_file)( //Query this first as we can do it without any other VMI lookups.
+            (int)enum_mask_value_file::GENERIC_WRITE | 
+            (int)enum_mask_value_file::GENERIC_ALL | 
+            (int)enum_mask_value_file::FILE_APPEND_DATA |
+            (int)enum_mask_value_file::FILE_WRITE_DATA |
+            (int)enum_mask_value_file::DELETE | 
+            (int)enum_mask_value_file::MAXIMUM_ALLOWED  ))) 
+    {
+        addr_t p_obj_attributes_struct = temp_args[2]; 
+        vmi_pid_t curr_pid = info->attached_proc_data.pid; 
+        const char* process_name = info->attached_proc_data.name;
 
-    drakvuf_pause(drakvuf);
+        std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+        addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
+        uint64_t obj_name_ustr_ptr = 0;         //Receiving variable for the response from the memory read below.
 
-    uint64_t obj_name_ustr_ptr = 0;
-
-    if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
-        {
-            std::cout << "Unable to read from Object Attributes." << "\n";
+        if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
+            {
+                std::cout << "ERROR     | Unable to read from Object Attributes." << "\n";
+            }
+        
+        unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
+        std::string target_filename = convert_ustr_to_string(target_filename_ustr); 
+ 
+        std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance. 
+        std::vector<uint8_t> file_to_protect_array = {};
+        
+        for(char ch : file_to_protect){        // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
+            file_to_protect_array.push_back(ch);
+            file_to_protect_array.push_back(0);
         }
-    
-    unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
+        std::string w_file_to_protect(file_to_protect_array.begin(), file_to_protect_array.end());
 
-    std::string target_filename;
-
-    if (target_filename_ustr != NULL) 
-    {
-        target_filename = convert_to_utf_8(target_filename_ustr);
-    }
-    else 
-    {
-        target_filename = "";   
-    }
-
-    std::cout << "File Handle Requested for " << target_filename << "\n"; // Enable for demos/debug only.
-
-    const char* mbr_path = "\\??\\PhysicalDrive0"; //FUTURE: This wants to be some list of target files to protect. (\\.\PhysicalDrive0 is actual)
-
-    //std::cout << "target_filename: " << target_filename << ". mbr_path: " << mbr_path << "\n";
-    
-    // Catch and neutralise attempts to write to the MBR
-    if (target_filename == mbr_path) // FUTURE: Replace this with config lookup
-    {
-        std::cout << "WARNING!! Attempted MBR overwrite by " << process_name << " (PID: " << curr_pid << ")" << "\n";
-        unsigned long target_vcpu = info->vcpu;
-        if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0, RDX, target_vcpu))
+        // Catch and neutralise attempts to write to the target file (or MBR if we set this to \\??\\.\\PhysicalDrive0)
+        if (target_filename == w_file_to_protect) // FUTURE: Replace this with config lookup
         {
-            std::cout << "Unable to overwrite vCPU register. \n";
-        } 
-        else 
-        {
-            std::cout << "MBR Access Prevented. " << "\n";
+            std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+            //std::cout << "Requested Access Mask is: " << std::bitset<32>(temp_args[1]) <<"\n";
+
+            if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0x0, RSP, info->vcpu))
+            {
+                std::cout << "ERROR     | Unable to overwrite vCPU register. \n";
+            } 
+            else 
+            {
+                std::cout << "ACTION    | File Handle request disrupted - RSP overwritten." << "\n";
+            }
         }
+
     }
     drakvuf_resume(drakvuf);
+    
 }
 
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
@@ -234,3 +236,27 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
         cFileName++; // move address 1 byte
     }
 }
+
+
+
+// inline unsigned int to_uint(char ch)
+// {
+//     return static_cast<unsigned int>(static_cast<unsigned char>(ch));
+// }
+
+//std::cout << "target_filename: " << target_filename << " | mbr_path: " << w_mbr_path << "\n";
+
+// std::cout << "Target Filename: ";
+
+// for (char ch : target_filename)
+// {
+//     std::cout << std::hex << "0x" << to_uint(ch) << ' '; 
+// }
+// std::cout << "\n";
+// std::cout << "MBR Path: ";
+
+// for (char ch : mbr_path_array)
+// {
+//     std::cout << std::hex << "0x" << (int)ch << ' '; 
+// }
+// std::cout << "\n";    

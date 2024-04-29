@@ -20,9 +20,9 @@
 #include "apimon.h"
 #include <libvmi/libvmi.h>
 
-std::string convert_to_utf_8(const unicode_string_t* ustr);
+// std::string convert_ustr_to_u16string(const unicode_string_t* ustr);
 
-void deception_nt_create_file(drakvuf_t drakvuf, drakvuf_trap_info* info);
+void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect);
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info);
 void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info);
 void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info);

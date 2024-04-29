@@ -113,16 +113,16 @@
 #include "deceptions.h" // Deception code
 
 
-namespace
-{
-
-// struct ApimonReturnHookData : PluginResult
+// namespace
 // {
-//     std::vector<uint64_t> arguments;
-//     hook_target_entry_t* target = nullptr;
-// };
 
-};
+// // struct ApimonReturnHookData : PluginResult
+// // {
+// //     std::vector<uint64_t> arguments;
+// //     hook_target_entry_t* target = nullptr;
+// // };
+
+// };
 
 static uint64_t make_hook_id(const drakvuf_trap_info_t* info)
 {
@@ -203,33 +203,30 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         return VMI_EVENT_RESPONSE_NONE;
 
     /* Start: Custom Deception Code */
-    std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact. 
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+    //std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact. 
     
     if (!strcmp(info->trap->name, "NtCreateFile")) {
-        deception_nt_create_file(drakvuf, info);
+        std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";  
+        deception_nt_create_file(drakvuf, vmi, info, file_to_protect);
 
     } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_net_user_get_info(vmi, info);
 
     } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_lookup_account_sid_w(vmi, info);
 
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
 
     } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
 
     } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
 
     } else if(!strcmp(info->trap->name, "FindNextFileA")) {
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
 
