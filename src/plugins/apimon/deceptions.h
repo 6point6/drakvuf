@@ -28,5 +28,6 @@ void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info)
 void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info);
 void deception_ssl_decrypt_packet(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename);
+void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info);
 
 #endif

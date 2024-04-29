@@ -62,3 +62,4 @@ build/*
 clang_output*
 
 .vscode/
+subprojects/*/

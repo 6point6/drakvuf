@@ -1,0 +1,6 @@
+[wrap-git]
+url = https://github.com/sewenew/redis-plus-plus.git
+revision = master
+depth = 1
+clone-recursive = true
+method = cmake

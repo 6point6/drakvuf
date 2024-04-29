@@ -237,26 +237,15 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
     }
 }
 
+void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> temp_args = data->arguments;
+    if(temp_args[2] != 432) {
+        std::cout << "bcrypt.dll: Not Mimikatz\n";
+        return;
+    }
 
-
-// inline unsigned int to_uint(char ch)
-// {
-//     return static_cast<unsigned int>(static_cast<unsigned char>(ch));
-// }
-
-//std::cout << "target_filename: " << target_filename << " | mbr_path: " << w_mbr_path << "\n";
-
-// std::cout << "Target Filename: ";
-
-// for (char ch : target_filename)
-// {
-//     std::cout << std::hex << "0x" << to_uint(ch) << ' '; 
-// }
-// std::cout << "\n";
-// std::cout << "MBR Path: ";
-
-// for (char ch : mbr_path_array)
-// {
-//     std::cout << std::hex << "0x" << (int)ch << ' '; 
-// }
-// std::cout << "\n";    
+    std::cout << "attached_proc.name: " << info->attached_proc_data.name << "\n";
+    std::cout << "trap->name: " << info->trap->name << "\n";
+    std::cout << "proc_data.name: " << info->proc_data.name << "\n";
+}
