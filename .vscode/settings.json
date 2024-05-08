@@ -1,6 +1,7 @@
 {
     "cmake.configureOnOpen": true,
     "files.associations": {
+        "*.txt": "plaintext",
         "limits": "cpp",
         "*.def": "cpp",
         "*.idef": "cpp",
@@ -77,6 +78,8 @@
         "stop_token": "cpp",
         "cfenv": "cpp",
         "typeinfo": "cpp",
-        "variant": "cpp"
-    }
+        "variant": "cpp",
+        "coroutine": "cpp"
+    },
+    "mesonbuild.configureOnOpen": false
 }

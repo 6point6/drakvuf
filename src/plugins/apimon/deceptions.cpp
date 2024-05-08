@@ -16,15 +16,12 @@
 #include <cstring>
 #include <codecvt>
 #include <locale>
+#include <stdint.h>
 #include "plugins/output_format.h"
 #include "apimon.h" 
-#include <bitset>
-#include <assert.h>
 #include "deception_utils.h"
 
-
-
-
+#define MAX_PATH 260
 
 /// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file. 
 /// This currently is achieved by overwriting the RSP register, resulting a crash of the calling process.
@@ -237,7 +234,7 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
     }
 }
 
-void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info) {
+void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments;
     if(temp_args[2] != 432) {
@@ -245,7 +242,87 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info) {
         return;
     }
 
-    std::cout << "attached_proc.name: " << info->attached_proc_data.name << "\n";
-    std::cout << "trap->name: " << info->trap->name << "\n";
-    std::cout << "proc_data.name: " << info->proc_data.name << "\n";
+    std::cout << "Base Addr: " << info->proc_data.base_addr << "\n";
+    std::cout << "Name: " << info->attached_proc_data.name << "\n";
+    std::cout << "RCX: " << std::hex << temp_args[0] << "\n";
+    std::cout << "RDX: " << std::hex << temp_args[1] << "\n";
+    std::cout << "R8:  " << std::hex << temp_args[2] << "\n";
+
+    uint64_t process_data[65];
+    if(VMI_SUCCESS == vmi_read_va(vmi, info->attached_proc_data.base_addr, info->attached_proc_data.pid, 8, &process_data, NULL)) {
+        for(int i = 65; i >= 0; i--) {
+            std::cout << process_data[i];
+        }
+        std::cout << "\n";
+    }
+    
+    // uint64_t rcx[450];
+    // addr_t list_head = 0;
+    // if(VMI_FAILURE == vmi_read_addr_ksym(vmi, "_KIWI_MSV1_0_PRIMARY_CREDENTIALS", &list_head)) {
+    //     printf("Failed to find _KIWI_MSV1_0_PRIMARY_CREDENTIALS\n");
+    //     return;
+    // }
+    // std::cout << "ADDR _KIWI_MSV1_0_PRIMARY_CREDENTIALS: " << list_head << "\n";
+    
+    // if(vmi_read_va(vmi, temp_args[0], info->proc_data.pid, 448, &rcx, NULL) == VMI_FAILURE) {
+    //     std::cout << "Failed to read RCX.\n";
+    //     return;
+    // }
+
+    // for(int i = 449; i >= 0; i--) {
+    //     std::cout << rcx[i];
+    // }
+    // std::cout << "\n";
+
+    // This is a really crude method, it just overwrites the data
+    // uint64_t buf[432] = {0};
+    // if(vmi_write_va(vmi, temp_args[1], info->proc_data.pid, 432, &buf, NULL) == VMI_FAILURE) {
+    //     std::cout << "Failed to overwrite LSASS struct.\n";
+    //     return;
+    // }
+    // std::cout << "Successfully overwrote LASS struct.\n";
+}
+
+void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
+    return;
+}
+
+void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
+    if(info->regs->rax == 0) { // If RAX is 0, then the function failed
+        std::cout << "RAX is 0, reached end of Linked List.\n";
+        return;
+    }
+
+    struct PROCESSENTRY32W {
+        uint32_t dwSize; // 4 bytes
+        uint32_t cntUsage; // 4 bytes
+        uint32_t th32ProcessID; // 4 bytes
+        uintptr_t th32DefaultHeapID; // 8 bytes
+        uint32_t th32ModuleID; // 4 bytes
+        uint32_t cntThreads; // 4 bytes
+        uint32_t th32ParentProcessID; // 4 bytes
+        int32_t pcPriClassBase; // 4 bytes
+        uint32_t dwFlags; // 4 bytes
+        wchar_t szExeFile[MAX_PATH]; // 2 bytes * 260
+    } pe32;
+    
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> args = data->arguments;
+    
+    if(vmi_read_va(vmi, args[1], info->proc_data.pid, 572, &pe32, NULL) == VMI_FAILURE) {
+        std::cout << "Failed to read PROCESSENTRY32W.\n";
+    } else {
+        std::cout << "dwSize: " << pe32.dwSize << "\n";
+        std::cout << "cntUsage: " << pe32.cntUsage << "\n";
+        std::cout << "th32ProcessID: " << pe32.th32ProcessID << "\n";
+        std::cout << "th32DefaultHeapID: " << pe32.th32DefaultHeapID << "\n";
+        std::cout << "th32ModuleID: " << pe32.th32ModuleID << "\n";
+        std::cout << "cntThreads: " << pe32.cntThreads << "\n";
+        std::cout << "th32ParentProcessID: " << pe32.th32ParentProcessID << "\n";
+        std::cout << "pcPriClassBase: " << pe32.pcPriClassBase << "\n";
+        std::cout << "dwFlags: " << pe32.dwFlags << "\n";
+
+        std::wcout << "szExeFile: " << pe32.szExeFile << "\n";
+        std::cout << "-----------\n";
+    }
 }

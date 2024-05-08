@@ -221,10 +221,11 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
     //std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact. 
     
-    if (!strcmp(info->trap->name, "NtCreateFile")) {
+    if(!strcmp(info->trap->name, "NtCreateFile")) {
         std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";  
         deception_nt_create_file(drakvuf, vmi, info, file_to_protect);
-
+    } else if(!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) {
+        deception_process_32_first_w(vmi, info, drakvuf);
     } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
         deception_net_user_get_info(vmi, info);
     } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
@@ -240,7 +241,9 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
-        deception_bcrypt_decrypt(vmi, info);
+        deception_bcrypt_decrypt(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
+        deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
