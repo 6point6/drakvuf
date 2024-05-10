@@ -241,6 +241,10 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
         deception_bcrypt_decrypt(vmi, info);
+    } else if(!strcmp(info->trap->name, "FilterFindFirst")) {
+        deception_filter_find(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "FilterFindNext")) {
+        deception_filter_find(vmi, info, drakvuf);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
