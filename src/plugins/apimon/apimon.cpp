@@ -124,6 +124,8 @@
 
 // };
 
+deception_plugin_config agent_config;
+
 static uint64_t make_hook_id(const drakvuf_trap_info_t* info)
 {
     uint64_t u64_pid = info->attached_proc_data.pid;
@@ -199,9 +201,12 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
 event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* info)
 {
     auto params = libhook::GetTrapParams<ApimonReturnHookData>(info);
+
     if (!params->verifyResultCallParams(drakvuf, info))
         return VMI_EVENT_RESPONSE_NONE;
-
+    
+    uint64_t hookID = make_hook_id(info);
+    drakvuf_pause(drakvuf);
     /* Start: Custom Deception Code */
     try {
         auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
@@ -219,7 +224,6 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
-    //std::cout << "Hit " << info->trap->name << " function!\n"; // Remove once completed debugging. Probably huge perf impact. 
     
     if(!strcmp(info->trap->name, "NtCreateFile")) {
         std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";  
@@ -241,16 +245,15 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
-        deception_bcrypt_decrypt(vmi, info, drakvuf);
+        deception_bcrypt_decrypt(vmi, info);
     } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
         deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
     }
-
-    uint64_t hookID = make_hook_id(info);
     ret_hooks.erase(hookID);
+    drakvuf_resume(drakvuf);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -466,6 +469,20 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
 
     breakpoint_in_system_process_searcher bp;
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
+
+    // INSERT NEW STARTUP STUFF HERE
+    std::cout << "Deceptions running and waiting for hooks..." << "\n";
+    //deception_plugin_config agent_config;
+
+    //Move Redis check to here? 
+
+    // agent_config.rtladjustprivilege.active = true;
+
+    // if(agent_config.rtladjustprivilege.active) {
+    //     std::cout << "it lives!";
+    // }
+
+    // END NEW STARTUP STUFF
 }
 
 bool apimon::stop_impl()

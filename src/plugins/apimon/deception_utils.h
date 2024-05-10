@@ -54,5 +54,7 @@ bool has_any_flag(uint32_t access_mask, enum_mask_value_file emvf);
 
 std::string convert_ustr_to_string(const unicode_string_t* ustr);
 std::u16string convert_string_to_u16string(std::string u8str);
+bool vector_contains(const std::vector<int>& v, int& t);
+uint16_t swap_uint16( uint16_t val );
 
 #endif

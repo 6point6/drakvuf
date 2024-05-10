@@ -20,6 +20,8 @@
 #include "plugins/output_format.h"
 #include "apimon.h" 
 #include "deception_utils.h"
+#include <algorithm>
+#include "deceptions.h"
 
 #define MAX_PATH 260
 
@@ -48,6 +50,7 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         const char* process_name = info->attached_proc_data.name;
 
         std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+
         addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
         uint64_t obj_name_ustr_ptr = 0;         //Receiving variable for the response from the memory read below.
 
@@ -59,7 +62,7 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
         std::string target_filename = convert_ustr_to_string(target_filename_ustr); 
  
-        std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance. 
+        //std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance. 
         std::vector<uint8_t> file_to_protect_array = {};
         
         for(char ch : file_to_protect){        // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
@@ -74,7 +77,7 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
             std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
             //std::cout << "Requested Access Mask is: " << std::bitset<32>(temp_args[1]) <<"\n";
 
-            if (VMI_FAILURE == vmi_set_vcpureg (vmi, 0x0, RSP, info->vcpu))
+            if (VMI_FAILURE == vmi_set_vcpureg(vmi, 0x0, RSP, info->vcpu))
             {
                 std::cout << "ERROR     | Unable to overwrite vCPU register. \n";
             } 
@@ -234,53 +237,177 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
     }
 }
 
-void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info* info, deception_plugin_config* config) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
     std::vector<uint64_t> temp_args = data->arguments;
-    if(temp_args[2] != 432) {
-        std::cout << "bcrypt.dll: Not Mimikatz\n";
-        return;
-    }
+    vmi_pid_t curr_pid = data->target->pid;
 
-    std::cout << "Base Addr: " << info->proc_data.base_addr << "\n";
-    std::cout << "Name: " << info->attached_proc_data.name << "\n";
-    std::cout << "RCX: " << std::hex << temp_args[0] << "\n";
-    std::cout << "RDX: " << std::hex << temp_args[1] << "\n";
-    std::cout << "R8:  " << std::hex << temp_args[2] << "\n";
+    if(temp_args[2] == 0x1B0) {                         // Mimikatz extractions are based on a fixed length. 0x1B0 for MSV, 0x40 for DPAPI. 
+        std::cout << "Mimikatz Identified (MSV1_0)!" << "\n";
 
-    uint64_t process_data[65];
-    if(VMI_SUCCESS == vmi_read_va(vmi, info->attached_proc_data.base_addr, info->attached_proc_data.pid, 8, &process_data, NULL)) {
-        for(int i = 65; i >= 0; i--) {
-            std::cout << process_data[i];
+        addr_t ntlm_address = temp_args[1]+0x4a;
+        addr_t user_address = temp_args[1]+0x1a0;
+        addr_t dom_address  = temp_args[1]+0x180;
+        addr_t sha1_address = temp_args[1]+0x6a;
+
+        uint16_t extracted_ntlm[8];
+        if(VMI_FAILURE == vmi_read_va(vmi, ntlm_address, curr_pid, 16, &extracted_ntlm, nullptr)){
+            std::cout << "Unable to read NTLM hash." << "\n";
         }
-        std::cout << "\n";
+
+        //========================================================================
+        // Below is just for printing and can be commented out when not debugging   
+        std::ostringstream convert;
+        for (ulong i = 0; i < sizeof(extracted_ntlm)/2; i++) {
+            convert << std::hex << (int)swap_uint16(extracted_ntlm[i]);
+        }
+
+        std::string extracted_ntlm_string = convert.str();
+        std::cout << "Decrypted NTLM: " << extracted_ntlm_string << "\n";
+        // std::cout << std::hex << extracted_ntlm << "\n";
+
+        //========================================================================
+        // Overwrite the NTLM hash. Some thought needs to go into this to understand what we want to write and to maintain some record of 
+        // what we've said before so that we have consistency. Maybe a sensible answer is to lookup the User ID from Redis and pull the 
+        // intended response from there?
+
+        std::vector<uint8_t> new_ntlm_hash = {0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef};
+        for (uint8_t byte: new_ntlm_hash)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, ntlm_address, curr_pid, &byte))
+            {
+                std::cout << "Unable to write new NTLM hash." << "\n";
+                break;
+            }
+            ntlm_address++; // move address 1 byte
+        }
+
+        //========================================================================
+        // Repeat the above process but for usernames.
+
+        uint16_t extracted_user[21]; // SAM account names have a 20 char limit so this handles the length plus a null-terminator.
+        if(VMI_FAILURE == vmi_read_va(vmi, user_address,curr_pid,20,&extracted_user, nullptr)){
+            std::cout << "Unable to read User." << "\n";
+        }
+
+        std::ostringstream convert_user;
+        for (ulong i = 0; i < sizeof(extracted_user)/2; i++) {
+            if(extracted_user[i] != 0) {
+                convert_user << (char)extracted_user[i];
+            }
+        }
+
+        std::string extracted_user_string = convert_user.str();
+        std::cout << "Decrypted User: "<< extracted_user_string << "\n";
+
+        std::vector<uint8_t> new_username = {0x43, 0x00, 0x70, 0x00, 0x74, 0x00, 0x2E, 0x00, 0x20, 0x00, 0x57, 0x00, 0x57, 0x00, 0x00, 0x00};
+
+        for (uint8_t byte: new_username)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, user_address, curr_pid, &byte))
+            {
+                std::cout << "Unable to write new username." << "\n";
+                break;
+            }
+            user_address++; // move address 1 byte
+        }
+        //========================================================================
+        // Repeat the above process but for Domains...
+        uint16_t extracted_domain[30]; // SAM account names have a 20 char limit so this handles the length plus a null-terminator.
+        if(VMI_FAILURE == vmi_read_va(vmi, dom_address,curr_pid,40,&extracted_domain, nullptr)){
+            std::cout << "Unable to read User." << "\n";
+        }
+
+        std::ostringstream convert_domain;
+        for (ulong i = 0; i < sizeof(extracted_domain)/2; i++) {
+            if(extracted_domain[i] != 0) {
+                convert_domain << (char)extracted_domain[i];
+            }
+        }
+
+        std::string extracted_domain_string = convert_domain.str();
+        std::cout << "Decrypted Domain: "<< extracted_domain_string << "\n";
+
+        unicode_string_t* domain_ustr = vmi_read_unicode_str_va(vmi, temp_args[1]+0xb0, curr_pid);
+        std::string domain = convert_ustr_to_string(domain_ustr); 
+        std::cout << "Ustr: " << domain << "\n";
+
+
+        std::vector<uint8_t> new_domain = {0x44, 0x00, 0x45, 0x00, 0x53, 0x00, 0x4b, 0x00, 0x54, 0x00, 0x4f, 0x00, 0x50, 0x00, 0x2d, 0x00, 
+                                            0x56, 0x00, 0x31, 0x00, 0x33, 0x00, 0x54, 0x00, 0x4e, 0x00, 0x34, 0x00, 0x4d, 0x00};
+
+        for (uint8_t byte: new_domain)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, dom_address, curr_pid, &byte))
+            {
+                std::cout << "Unable to write new domain." << "\n";
+                break;
+            }
+            dom_address++; // move address 1 byte
+        }
+        //========================================================================
+        // Repeat the above process but for SHA1...
+        uint16_t extracted_sha1[21];
+        if(VMI_FAILURE == vmi_read_va(vmi, sha1_address, curr_pid, 20, &extracted_sha1, nullptr)){
+            std::cout << "Unable to read NTLM hash." << "\n";
+        }
+
+        //========================================================================
+        // Below is just for printing and can be commented out when not debugging   
+        std::ostringstream convert_sha1;
+        for (ulong i = 0; i < sizeof(extracted_sha1)/2; i++) {
+            convert_sha1 << std::hex << (int)swap_uint16(extracted_sha1[i]);
+        }
+
+        std::string extracted_sha1_string = convert_sha1.str();
+        std::cout << "Decrypted SHA1: " << extracted_sha1_string << "\n";
+        // std::cout << std::hex << extracted_ntlm << "\n";
+
+        //========================================================================
+        // Overwrite the NTLM hash. Some thought needs to go into this to understand what we want to write and to maintain some record of 
+        // what we've said before so that we have consistency. Maybe a sensible answer is to lookup the User ID from Redis and pull the 
+        // intended response from there?
+
+        std::vector<uint8_t> new_sha1_hash = {0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 
+                                                0x00, 0x00, 0x00, 0x00};
+        for (uint8_t byte: new_sha1_hash)
+        {
+            if (VMI_FAILURE == vmi_write_8_va(vmi, sha1_address, curr_pid, &byte))
+            {
+                std::cout << "Unable to write new SHA1 hash." << "\n";
+                break;
+            }
+            sha1_address++; // move address 1 byte
+        }
+
+    } else if(temp_args[2] == 0x40) 
+    {
+        std::cout << "Mimikatz Identified (DPAPI)!" << "\n";
+        addr_t dpapi_address = temp_args[1];
+        uint16_t extracted_dpapi[32];
+        if(VMI_FAILURE == vmi_read_va(vmi, dpapi_address, curr_pid, 32, &extracted_dpapi, nullptr)){
+            std::cout << "Unable to read NTLM hash." << "\n";
+        }
+
+        std::ostringstream convert_dpapi;
+        for (ulong i = 0; i < sizeof(extracted_dpapi)/2; i++) {
+            convert_dpapi << std::hex << (int)swap_uint16(extracted_dpapi[i]);
+        }
+
+        std::string extracted_dpapi_string = convert_dpapi.str();
+        std::cout << "Decrypted DPAPI Key: " << extracted_dpapi_string << "\n";
+
+        // std::vector<uint8_t> new_dpapi = {0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef};
+        // for (uint8_t byte: new_dpapi)
+        // {
+        //     if (VMI_FAILURE == vmi_write_8_va(vmi, ntlm_address, curr_pid, &byte))
+        //     {
+        //         std::cout << "Unable to write new HTLM hash." << "\n";
+        //         break;
+        //     }
+        //     dpapi_address++; // move address 1 byte
+        // }
     }
-    
-    // uint64_t rcx[450];
-    // addr_t list_head = 0;
-    // if(VMI_FAILURE == vmi_read_addr_ksym(vmi, "_KIWI_MSV1_0_PRIMARY_CREDENTIALS", &list_head)) {
-    //     printf("Failed to find _KIWI_MSV1_0_PRIMARY_CREDENTIALS\n");
-    //     return;
-    // }
-    // std::cout << "ADDR _KIWI_MSV1_0_PRIMARY_CREDENTIALS: " << list_head << "\n";
-    
-    // if(vmi_read_va(vmi, temp_args[0], info->proc_data.pid, 448, &rcx, NULL) == VMI_FAILURE) {
-    //     std::cout << "Failed to read RCX.\n";
-    //     return;
-    // }
-
-    // for(int i = 449; i >= 0; i--) {
-    //     std::cout << rcx[i];
-    // }
-    // std::cout << "\n";
-
-    // This is a really crude method, it just overwrites the data
-    // uint64_t buf[432] = {0};
-    // if(vmi_write_va(vmi, temp_args[1], info->proc_data.pid, 432, &buf, NULL) == VMI_FAILURE) {
-    //     std::cout << "Failed to overwrite LSASS struct.\n";
-    //     return;
-    // }
-    // std::cout << "Successfully overwrote LASS struct.\n";
 }
 
 void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
@@ -293,8 +420,6 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         return;
     }
 
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> args = data->arguments;
     struct PROCESSENTRY32W {
         uint32_t dwSize; // 4 bytes
         uint32_t cntUsage; // 4 bytes
@@ -307,35 +432,24 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         uint32_t dwFlags; // 4 bytes
         wchar_t szExeFile[MAX_PATH]; // 2 bytes * 260
     } pe32;
-    
+
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> args = data->arguments;
+
     if(vmi_read_va(vmi, args[1], info->proc_data.pid, 572, &pe32, NULL) == VMI_FAILURE) {
         std::cout << "Failed to read PROCESSENTRY32W.\n";
     } else {
-        std::wcout << L"cntUsage: " << std::dec << pe32.cntUsage << L'\n';
-        std::wcout << L"th32ProcessID: " << std::dec << pe32.th32ProcessID << L'\n';
-        std::wcout << L"th32DefaultHeapID: " << std::dec << pe32.th32DefaultHeapID << L'\n';
-        std::wcout << L"th32ModuleID: " << std::dec << pe32.th32ModuleID << L'\n';
-        std::wcout << L"cntThreads: " << std::dec << pe32.cntThreads << L'\n';
-        std::wcout << L"th32ParentProcessID: " << std::dec << pe32.th32ParentProcessID << L'\n';
-        std::wcout << L"pcPriClassBase: " << std::dec << pe32.pcPriClassBase << L'\n';
-        std::wcout << L"dwFlags: " << std::dec << pe32.dwFlags << L'\n';
+        std::cout << "dwSize: " << pe32.dwSize << "\n";
+        std::cout << "cntUsage: " << pe32.cntUsage << "\n";
+        std::cout << "th32ProcessID: " << pe32.th32ProcessID << "\n";
+        std::cout << "th32DefaultHeapID: " << pe32.th32DefaultHeapID << "\n";
+        std::cout << "th32ModuleID: " << pe32.th32ModuleID << "\n";
+        std::cout << "cntThreads: " << pe32.cntThreads << "\n";
+        std::cout << "th32ParentProcessID: " << pe32.th32ParentProcessID << "\n";
+        std::cout << "pcPriClassBase: " << pe32.pcPriClassBase << "\n";
+        std::cout << "dwFlags: " << pe32.dwFlags << "\n";
 
-        pe32.szExeFile[sizeof(pe32.szExeFile) / sizeof(wchar_t) - 1] = L'\0';
-
-        // Check if the string contains valid UTF-16 data
-        if (std::find_if(std::begin(pe32.szExeFile), std::end(pe32.szExeFile), [](wchar_t wc) { return wc == static_cast<wchar_t>(0xDC00) || wc == static_cast<wchar_t>(0xD800); }) == std::end(pe32.szExeFile)) {
-            try {
-                // Convert the Windows wchar_t string to a Linux wchar_t string
-                std::wstring_convert<std::codecvt_utf16<wchar_t>, wchar_t> convert;
-                std::wstring szExeFileLinux = convert.from_bytes(reinterpret_cast<char*>(pe32.szExeFile));
-                std::wcout << L"szExeFile: " << szExeFileLinux << L'\n';
-            } catch (std::range_error& e) {
-                std::cout << "Failed to convert szExeFile: " << e.what() << '\n';
-            }
-        } else {
-            std::cout << "szExeFile contains invalid UTF-16 data.\n";
-        }
-       
-        std::wcout << L"-----------\n";
+        std::wcout << "szExeFile: " << pe32.szExeFile << "\n";
+        std::cout << "-----------\n";
     }
 }
