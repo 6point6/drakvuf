@@ -293,6 +293,8 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         return;
     }
 
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> args = data->arguments;
     struct PROCESSENTRY32W {
         uint32_t dwSize; // 4 bytes
         uint32_t cntUsage; // 4 bytes
@@ -306,23 +308,34 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         wchar_t szExeFile[MAX_PATH]; // 2 bytes * 260
     } pe32;
     
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> args = data->arguments;
-    
     if(vmi_read_va(vmi, args[1], info->proc_data.pid, 572, &pe32, NULL) == VMI_FAILURE) {
         std::cout << "Failed to read PROCESSENTRY32W.\n";
     } else {
-        std::cout << "dwSize: " << pe32.dwSize << "\n";
-        std::cout << "cntUsage: " << pe32.cntUsage << "\n";
-        std::cout << "th32ProcessID: " << pe32.th32ProcessID << "\n";
-        std::cout << "th32DefaultHeapID: " << pe32.th32DefaultHeapID << "\n";
-        std::cout << "th32ModuleID: " << pe32.th32ModuleID << "\n";
-        std::cout << "cntThreads: " << pe32.cntThreads << "\n";
-        std::cout << "th32ParentProcessID: " << pe32.th32ParentProcessID << "\n";
-        std::cout << "pcPriClassBase: " << pe32.pcPriClassBase << "\n";
-        std::cout << "dwFlags: " << pe32.dwFlags << "\n";
+        std::wcout << L"cntUsage: " << std::dec << pe32.cntUsage << L'\n';
+        std::wcout << L"th32ProcessID: " << std::dec << pe32.th32ProcessID << L'\n';
+        std::wcout << L"th32DefaultHeapID: " << std::dec << pe32.th32DefaultHeapID << L'\n';
+        std::wcout << L"th32ModuleID: " << std::dec << pe32.th32ModuleID << L'\n';
+        std::wcout << L"cntThreads: " << std::dec << pe32.cntThreads << L'\n';
+        std::wcout << L"th32ParentProcessID: " << std::dec << pe32.th32ParentProcessID << L'\n';
+        std::wcout << L"pcPriClassBase: " << std::dec << pe32.pcPriClassBase << L'\n';
+        std::wcout << L"dwFlags: " << std::dec << pe32.dwFlags << L'\n';
 
-        std::wcout << "szExeFile: " << pe32.szExeFile << "\n";
-        std::cout << "-----------\n";
+        pe32.szExeFile[sizeof(pe32.szExeFile) / sizeof(wchar_t) - 1] = L'\0';
+
+        // Check if the string contains valid UTF-16 data
+        if (std::find_if(std::begin(pe32.szExeFile), std::end(pe32.szExeFile), [](wchar_t wc) { return wc == static_cast<wchar_t>(0xDC00) || wc == static_cast<wchar_t>(0xD800); }) == std::end(pe32.szExeFile)) {
+            try {
+                // Convert the Windows wchar_t string to a Linux wchar_t string
+                std::wstring_convert<std::codecvt_utf16<wchar_t>, wchar_t> convert;
+                std::wstring szExeFileLinux = convert.from_bytes(reinterpret_cast<char*>(pe32.szExeFile));
+                std::wcout << L"szExeFile: " << szExeFileLinux << L'\n';
+            } catch (std::range_error& e) {
+                std::cout << "Failed to convert szExeFile: " << e.what() << '\n';
+            }
+        } else {
+            std::cout << "szExeFile contains invalid UTF-16 data.\n";
+        }
+       
+        std::wcout << L"-----------\n";
     }
 }
