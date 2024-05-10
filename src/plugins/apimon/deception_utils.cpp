@@ -48,3 +48,14 @@ std::u16string convert_string_to_u16string(std::string u8str) {
     std::u16string new_u16str = convert.from_bytes(u8str);
     return new_u16str;
 }
+
+bool vector_contains(const std::vector<int>& v, int& t)
+{
+    bool found = (std::find(v.begin(), v.end(), t) != v.end());
+    return found;
+}
+
+uint16_t swap_uint16( uint16_t val ) 
+{
+    return (val << 8) | (val >> 8 );
+}

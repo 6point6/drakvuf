@@ -77,6 +77,13 @@
         "stop_token": "cpp",
         "cfenv": "cpp",
         "typeinfo": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "csignal": "cpp",
+        "scoped_allocator": "cpp",
+        "shared_mutex": "cpp",
+        "span": "cpp",
+        "typeindex": "cpp",
+        "valarray": "cpp",
+        "coroutine": "cpp"
     }
 }
