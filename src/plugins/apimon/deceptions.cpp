@@ -430,7 +430,7 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         uint32_t th32ParentProcessID; // 4 bytes
         int32_t pcPriClassBase; // 4 bytes
         uint32_t dwFlags; // 4 bytes
-        wchar_t szExeFile[MAX_PATH]; // 2 bytes * 260
+        uint16_t szExeFile[MAX_PATH]; // 2 bytes * 260
     } pe32;
 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
@@ -448,6 +448,20 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         std::cout << "th32ParentProcessID: " << pe32.th32ParentProcessID << "\n";
         std::cout << "pcPriClassBase: " << pe32.pcPriClassBase << "\n";
         std::cout << "dwFlags: " << pe32.dwFlags << "\n";
+
+//==================================================================
+        std::ostringstream convert_exefile;
+        for (ulong i = 0; i < sizeof(pe32.szExeFile); i++) {
+            if(isprint((int)pe32.szExeFile[i])> 0) {
+                convert_exefile << (char)pe32.szExeFile[i];
+            }
+            else {
+                break;
+            }
+        }
+        std::string convert_exefile_str = convert_exefile.str();
+        std::cout << "Decoded Exe: "<< convert_exefile_str << "\n";
+//==================================================================
 
         std::wcout << "szExeFile: " << pe32.szExeFile << "\n";
         std::cout << "-----------\n";
