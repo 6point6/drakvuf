@@ -16,16 +16,16 @@
 #include <cstring>
 #include <codecvt>
 #include <locale>
+#include <stdint.h>
 #include "plugins/output_format.h"
 #include "apimon.h" 
-#include <bitset>
-#include <assert.h>
 #include "deception_utils.h"
 #include <algorithm>
 #include "deceptions.h"
 
+#define MAX_PATH 260
 
-/// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object and access mask , blocking access if it is a specified file. 
+/// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file. 
 /// This currently is achieved by overwriting the RSP register, resulting a crash of the calling process.
 /// @param drakvuf
 /// @param vmi  

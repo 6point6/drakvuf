@@ -27,7 +27,7 @@ bool has_any_flag(uint32_t access_mask, enum_mask_value_file emvf)
 /// @param ustr UNICODE_STRING to convert 
 /// @return Converted string
 std::string convert_ustr_to_string(const unicode_string_t* ustr) {
-    if (ustr->contents != 0) 
+    if (ustr != 0) 
     {
         if (strcmp(ustr->encoding, "UTF-16") == 0) {
             return std::string(reinterpret_cast<const char*>(ustr->contents), ustr->length);

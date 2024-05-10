@@ -1,6 +1,7 @@
 {
     "cmake.configureOnOpen": true,
     "files.associations": {
+        "*.txt": "plaintext",
         "limits": "cpp",
         "*.def": "cpp",
         "*.idef": "cpp",
@@ -78,12 +79,7 @@
         "cfenv": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "csignal": "cpp",
-        "scoped_allocator": "cpp",
-        "shared_mutex": "cpp",
-        "span": "cpp",
-        "typeindex": "cpp",
-        "valarray": "cpp",
         "coroutine": "cpp"
-    }
+    },
+    "mesonbuild.configureOnOpen": false
 }
