@@ -248,6 +248,10 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
     } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
         deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "FilterFindFirst")) {
+        deception_filter_find(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "FilterFindNext")) {
+        deception_filter_find(vmi, info, drakvuf);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
