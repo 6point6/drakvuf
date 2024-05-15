@@ -204,14 +204,14 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     if (!params->verifyResultCallParams(drakvuf, info))
         return VMI_EVENT_RESPONSE_NONE;
-    
+
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
     /* Start: Custom Deception Code */
     try {
         auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
         auto val = redis.get(info->trap->name);
-        
+
         if (!val) {
             std::cout << "Redis: " << info->trap->name << ", trap not active.\n";
             uint64_t hookID = make_hook_id(info);
@@ -223,27 +223,37 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     }
 
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-    std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
-    
+    std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact.
+
     if(!strcmp(info->trap->name, "NtCreateFile")) {
-        std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";  
+        std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";
         deception_nt_create_file(drakvuf, vmi, info, file_to_protect);
     } else if(!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) {
         deception_process_32_first_w(vmi, info, drakvuf);
     } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
         deception_net_user_get_info(vmi, info);
+
+    } else if(!strcmp(info->trap->name, "NetUserEnum")) {
+        deception_net_user_enum(vmi, info);
+
+    } else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
+        deception_net_lgrp_getmem(vmi, info);
+
     } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
-        deception_lookup_account_sid_w(vmi, info);
+        deception_lookup_account_sidw(vmi, info);
+
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
     } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
+    /*
     } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
     } else if(!strcmp(info->trap->name, "FindNextFileA")) {
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+    */
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
         deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
     } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
@@ -369,7 +379,7 @@ static void on_dll_discovered(drakvuf_t drakvuf, const std::string& dll_name, co
         auto vmi = vmi_lock_guard(drakvuf);
         vmi_dtb_to_pid(vmi, dll->dtb, &pid);
     }
-    
+
     plugin->wanted_hooks.visit_hooks_for(dll_name, [&](const auto& e)
     {
         drakvuf_request_usermode_hook(drakvuf, dll, &e, usermode_hook_cb, plugin);
@@ -462,14 +472,14 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         // don't load this plugin if there is nothing to do
         return;
     }
-    
+
     usermode_cb_registration reg =
     {
         .pre_cb = on_dll_discovered,
         .post_cb = on_dll_hooked,
         .extra = (void*)this
     };
-    drakvuf_register_usermode_callback(drakvuf, &reg);  
+    drakvuf_register_usermode_callback(drakvuf, &reg);
 
     breakpoint_in_system_process_searcher bp;
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
@@ -478,7 +488,7 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     std::cout << "Deceptions running and waiting for hooks..." << "\n";
     //deception_plugin_config agent_config;
 
-    //Move Redis check to here? 
+    //Move Redis check to here?
 
     // agent_config.rtladjustprivilege.active = true;
 
