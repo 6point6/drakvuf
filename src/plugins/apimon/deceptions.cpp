@@ -22,6 +22,7 @@
 #include "deception_utils.h"
 #include <algorithm>
 #include "deceptions.h"
+#include <iostream>
 
 #define MAX_PATH 260
 
@@ -411,10 +412,83 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
 }
 
 void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
-    return;
+    std::cout << "RAX: " << std::hex << info->regs->rax << "\n";
+    addr_t list_head = 0;
+    int LIST_ENTRY_BASE_OFFSET = 0x448;
+    int _HANDLE_TABLE_BASE_OFFSET = 0x18;
+
+    struct _LIST_ENTRY {
+        struct _LIST_ENTRY *Flink;
+        struct _LIST_ENTRY *Blink;
+    } LIST_ENTRY, HandleTableList;
+    
+    // Get the address of the PsActiveProcessHead
+    if(VMI_FAILURE == vmi_read_addr_ksym(vmi, "PsActiveProcessHead", &list_head)) {
+        printf("Failed to find PsActiveProcessHead\n");
+        return;
+    }
+    std::cout << "PsActiveProcessHead: 0x" << std::hex << list_head << "\n";
+    
+    // Read the LIST_ENTRY structure
+    if(VMI_FAILURE == vmi_read_va(vmi, list_head, 0, sizeof(LIST_ENTRY), &LIST_ENTRY, NULL)) {
+        printf("Failed to read LIST_ENTRY\n");
+        return;
+    }
+
+    addr_t END_LINK = (addr_t)LIST_ENTRY.Blink;
+    while((addr_t)LIST_ENTRY.Flink != END_LINK) {
+        char ImageFileName[16];
+        addr_t _EPROCESS = (addr_t)LIST_ENTRY.Flink - LIST_ENTRY_BASE_OFFSET;
+        addr_t ImageFileName_addr = _EPROCESS + 0x5a8;
+
+        if(VMI_FAILURE == vmi_read_va(vmi, ImageFileName_addr, 0, sizeof(ImageFileName), &ImageFileName, NULL)) {
+            printf("Failed to read next pointer.\n");
+            return;
+        }        
+
+        if(std::string(info->attached_proc_data.name).find(std::string(ImageFileName)) != std::string::npos) {
+            std::cout << "Found Attached Process: " << ImageFileName << "\n";
+            break;
+        }
+
+        // Get the next structure
+        if(VMI_FAILURE == vmi_read_va(vmi, (addr_t)LIST_ENTRY.Flink, 0, sizeof(LIST_ENTRY), &LIST_ENTRY, NULL)) {
+            printf("Failed to read next pointer.\n");
+            return;
+        }
+    }
+
+    addr_t _EPROCESS = (addr_t)LIST_ENTRY.Flink - LIST_ENTRY_BASE_OFFSET;
+    addr_t HandleTable = _EPROCESS + 0x570;
+    addr_t HandleTableList_addr = HandleTable + 0x18;
+
+    if(VMI_FAILURE == vmi_read_va(vmi, HandleTableList_addr, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
+        printf("Failed to read LIST_ENTRY\n");
+        return;
+    }
+
+    addr_t HT_END_LINK = (addr_t)HandleTableList.Blink;
+    while((addr_t)HandleTableList.Flink != HT_END_LINK) {
+        addr_t _HANDLE_TABLE = (addr_t)HandleTableList.Flink - _HANDLE_TABLE_BASE_OFFSET;
+        char ActualEntry[32];
+
+        if(VMI_FAILURE == vmi_read_va(vmi, _HANDLE_TABLE + 0x40, 0, sizeof(ActualEntry), &ActualEntry, NULL)) {
+            printf("ActualEntry Failed to read next pointer.\n");
+            return;
+        }
+
+        std::cout << "ActualEntry: " << ActualEntry << "\n";
+
+        // Get the next structure
+        if(VMI_FAILURE == vmi_read_va(vmi, (addr_t)HandleTableList.Flink, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
+            printf("Failed to read next pointer.\n");
+            return;
+        }
+    }
 }
 
 void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
+    return;
     if(info->regs->rax == 0) { // If RAX is 0, then the function failed
         std::cout << "RAX is 0, reached end of Linked List.\n";
         return;
