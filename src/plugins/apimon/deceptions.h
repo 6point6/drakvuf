@@ -31,7 +31,6 @@ struct  deception_config {
     };
 
 struct deception_plugin_config {
-    bool first_run;
     std::time_t last_update;
     deception_config ntcreatefile;
     deception_config netusergetinfo;

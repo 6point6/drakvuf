@@ -114,16 +114,6 @@
 #include "deception_utils.h" // Deception code
 #include <sw/redis++/redis++.h>
 
-// namespace
-// {
-
-// struct ApimonReturnHookData : PluginResult
-// {
-//     std::vector<uint64_t> arguments;
-//     hook_target_entry_t* target = nullptr;
-// };
-
-// };
 
 deception_plugin_config agent_config;
 
@@ -209,19 +199,6 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
     /* Start: Custom Deception Code */
-    // try {
-    //     auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
-    //     auto val = redis.get(info->trap->name);
-        
-    //     if (!val) {
-    //         std::cout << "Redis: " << info->trap->name << ", trap not active.\n";
-    //         uint64_t hookID = make_hook_id(info);
-    //         ret_hooks.erase(hookID);
-    //         return VMI_EVENT_RESPONSE_NONE;
-    //     }
-    // } catch (const sw::redis::Error &e) {
-    //     std::cout << e.what() << "\n";
-    // }
     
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
@@ -487,8 +464,6 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     // INSERT NEW STARTUP STUFF HERE
     std::cout << "Starting setup..." << "\n";
     agent_config.last_update = 0;
-    // std::cout << "Connecting to Redis..." << "\n";
-    // auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
     get_config_from_redis(&agent_config);
     std::cout << "Deceptions running and waiting for hooks..." << "\n";
 
