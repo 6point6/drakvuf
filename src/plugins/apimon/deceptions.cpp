@@ -139,153 +139,23 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     }
 }
 
-/*###################### NET-USER-ENUM ################################*/
-
-void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info) {
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
-    addr_t bufptr = temp_args[3]; // Store address of bufptr (4th arg)
-    std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n"; // Print the address of the 4th arg
-    vmi_pid_t curr_pid = data->target->pid; // Get PID of process
-
-    uint64_t pUserInfo_0 = 0; // Store address of User_Info_0 struct
-    uint64_t pUsri0_name = 0; // Store address of Usri0_name struct
-
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_0)) // Read address at pointer (arg3)
-    {
-        std::cout << "Error occured 1" << "\n";
-    }
-    std::cout << "pUserInfo_0: 0x" << std::hex << pUserInfo_0 << "\n";
-
-
-    // entriesread is the 5th argument to get number of usernames enumerated
-    uint64_t entriesread = temp_args[4];
-
-    for(uint64_t i = 0; i < entriesread; i++) {
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pUserInfo_0 + i * sizeof(uint64_t)), curr_pid, &pUsri0_name)) // Print address of pUserInfo_0
-        {
-            std::cout << "Error occured 2" << "\n";
-        }
-
-    // Read the string at pUsri0_name
-    char* username = vmi_read_str_va(vmi, pUsri0_name, curr_pid);
-if(username) {
-    std::string usernameStr(username);
-    if(usernameStr == "HIGHPRIV") {
-        // Replace "HIGHPRIV" with non-printable ASCII character in memory
-        uint8_t nullChar[] = {0, 0}; // UTF-16LE null character
-        std::cout << "HIGHPRIV account nulled!" << "\n";
-        if (VMI_FAILURE == vmi_write_va(vmi, pUsri0_name, curr_pid, sizeof(nullChar),nullChar, NULL)) {
-            std::cout << "Writing to memory failed!" << "\n";
-        }
-    } else {
-        std::cout << "Username: " << username << "\n";
-    }
-    free(username);
-} else {
-    std::cout << "Error reading username" << "\n";
-}
-    }
-}
-
-/*###################### NET-LOCALGROUP-GETMEMBERS ################################*/
-
-void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info) {
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-    std::vector<uint64_t> temp_args = data->arguments;
-    addr_t bufptr = temp_args[3];
-    std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
-    vmi_pid_t curr_pid = data->target->pid;
-
-    uint64_t pLocalGroupMembersInfo_3 = 0;
-    uint64_t pLgrmi3_domainandname = 0;
-
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pLocalGroupMembersInfo_3)) {
-        std::cout << "Error occured 1" << "\n";
-    }
-    std::cout << "pLocalGroupMembersInfo_3: 0x" << std::hex << pLocalGroupMembersInfo_3 << "\n";
-
-    uint64_t entriesread = temp_args[4]; // Get the number of entries read
-
-    for(uint64_t i = 0; i < entriesread; i++) { // Loop over each entry
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pLocalGroupMembersInfo_3 + i * sizeof(uint64_t)), curr_pid, &pLgrmi3_domainandname)) {
-            std::cout << "Error occured 2" << "\n";
-        }
-
-        char* domainandname = vmi_read_str_va(vmi, pLgrmi3_domainandname, curr_pid); // Read the domain and name as a str
-        if(domainandname) {
-            std::string domainandnameStr(domainandname); // Convert domain + name to str
-            size_t pos = domainandnameStr.find('\\'); // Find the pos of \ in str
-            if(pos != std::string::npos) {
-                std::string accountName = domainandnameStr.substr(pos + 1); // Get account name part of the str
-                if(accountName == "HIGHPRIV") {
-                    uint8_t nullChar[] = {0, 0}; // Create null chara
-                    std::cout << "HIGHPRIV account nulled!" << "\n";
-                    if (VMI_FAILURE == vmi_write_va(vmi, pLgrmi3_domainandname + pos + 1, curr_pid, sizeof(nullChar), nullChar, NULL)) { // Write the null character
-                        std::cout << "Writing to memory failed!" << "\n";
-                    }
-                } else {
-                    std::cout << "Domain and Name: " << domainandname << "\n";
-                }
-            }
-            free(domainandname);
-        } else {
-            std::cout << "Error reading domain and name" << "\n";
-        }
-    }
-}
-
-/*###################### LookupAccountSIDW ################################*/
-
-void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
-
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
-    vmi_pid_t curr_pid = data->target->pid; // Get PID of process
-
+void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info) {
+    vmi_pid_t curr_pid = info->attached_proc_data.pid; // Get PID of process
     addr_t pSID = info->regs->rdx; // Get address of PSID
-    std::cout << "    PSID: 0x" << std::hex << pSID << "\n"; // Print the address of the PSID
+    uint8_t fake_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0}; // Replace current user SID with system
+    /*  REAL System user SID
+        01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00 */
 
-    uint8_t subAuthorityCount; // Check subAuths to get SID size
-    if (VMI_FAILURE == vmi_read_8_va(vmi, (addr_t)pSID + 1, curr_pid, &subAuthorityCount)) {
-        std::cout << "Reading SubAuthorityCount failed!" << "\n";
-        return;
-    }
-
-    size_t sidLength = 8 + 4 * subAuthorityCount;
-
-    uint8_t system_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0}; // System user SID
-    uint8_t guest_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0, 0, 0, 0, 0}; // Guest user SID
-
-    // Read the current SID
-    uint8_t current_SID[sidLength];
-    if (VMI_FAILURE == vmi_read_va(vmi, pSID, curr_pid, sidLength, current_SID, NULL)) {
-        std::cout << "Reading current SID failed!" << "\n";
-        return;
-    }
-
-    // If the current SID is not the system SID, zero out the old SID
-    if (memcmp(current_SID, system_SID, 16) != 0) {
-        for (size_t i = 0; i < sidLength; i++) {
-            uint8_t zero = 0;
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID + i, curr_pid, &zero)) {
-                std::cout << "Zeroing out old SID failed!" << "\n";
-                return;
-            }
-        }
-    }
-
-    // If the current SID is the system SID, overwrite the SID with guest SID
-    // Otherwise, overwrite the SID with system SID
-    uint8_t* new_SID = (memcmp(current_SID, system_SID, 16) == 0) ? guest_SID : system_SID;
-
-    for (int i = 0; i < 16; i++) {
-        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID + i, curr_pid, &new_SID[i])) {
+    for (uint8_t byte: fake_SID) // Modify input argument 2
+    {
+        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID, curr_pid, &byte))
+        {
             std::cout << "Writing to mem failed!" << "\n";
             break;
         }
     }
-}
+
+####################################
 
 void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info) {
     std::cout << "Pausing guest..." << "\n";
