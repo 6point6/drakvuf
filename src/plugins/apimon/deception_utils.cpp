@@ -14,6 +14,7 @@
 #include "deceptions.h"
 #include <ctime>
 #include <sw/redis++/redis++.h>
+#include <iconv.h>
 
 
 /// @brief 
