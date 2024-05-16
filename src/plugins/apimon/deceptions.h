@@ -19,17 +19,30 @@
 #include "plugins/plugins_ex.h"
 #include "apimon.h"
 #include <libvmi/libvmi.h>
+#include <ctime>
 
 struct  deception_config {
         bool enabled;                                   // Is the function turned on?
         bool active;                                    // Has the function been called and has a leftover effect?
         uint64_t overwritten_instruction;               // Example parameter to persist data over callbacks 
         addr_t overwrite_address;                       // Overwrite location
+        std::string target_string;                      
+        std::string replacement_string;
     };
 
 struct deception_plugin_config {
-     deception_config rtladjustprivilege;
-     deception_config ntcreatefile;
+    bool first_run;
+    std::time_t last_update;
+    deception_config ntcreatefile;
+    deception_config netusergetinfo;
+    deception_config lookupaccountsid;
+    deception_config icmpsendecho2ex;
+    deception_config ssldecryptpacket;
+    deception_config findfirstornextfile;
+    deception_config bcryptdecrypt;
+    deception_config createtoolhelp32snapshot;
+    deception_config process32firstw;
+    deception_config filterfind;
 };
 
 typedef struct deception_plugin_config* deception_plugin_config_t;

@@ -111,6 +111,7 @@
 #include "apimon.h"
 #include "crypto.h"
 #include "deceptions.h" // Deception code
+#include "deception_utils.h" // Deception code
 #include <sw/redis++/redis++.h>
 
 // namespace
@@ -208,53 +209,62 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
     /* Start: Custom Deception Code */
-    try {
-        auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
-        auto val = redis.get(info->trap->name);
+    // try {
+    //     auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
+    //     auto val = redis.get(info->trap->name);
         
-        if (!val) {
-            std::cout << "Redis: " << info->trap->name << ", trap not active.\n";
-            uint64_t hookID = make_hook_id(info);
-            ret_hooks.erase(hookID);
-            return VMI_EVENT_RESPONSE_NONE;
-        }
-    } catch (const sw::redis::Error &e) {
-        std::cout << e.what() << "\n";
-    }
-
+    //     if (!val) {
+    //         std::cout << "Redis: " << info->trap->name << ", trap not active.\n";
+    //         uint64_t hookID = make_hook_id(info);
+    //         ret_hooks.erase(hookID);
+    //         return VMI_EVENT_RESPONSE_NONE;
+    //     }
+    // } catch (const sw::redis::Error &e) {
+    //     std::cout << e.what() << "\n";
+    // }
+    
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
-    
-    if(!strcmp(info->trap->name, "NtCreateFile")) {
-        std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";  
-        deception_nt_create_file(drakvuf, vmi, info, file_to_protect);
-    } else if(!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) {
+    get_config_from_redis(&agent_config);
+
+    if(!strcmp(info->trap->name, "NtCreateFile") && agent_config.ntcreatefile.enabled == true) {  
+        deception_nt_create_file(drakvuf, vmi, info, agent_config.ntcreatefile.target_string);
+
+    } else if((!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) && agent_config.ntcreatefile.enabled == true) {
         deception_process_32_first_w(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
+
+    } else if(!strcmp(info->trap->name, "NetUserGetInfo") && agent_config.process32firstw.enabled == true) {
         deception_net_user_get_info(vmi, info);
-    } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
+
+    } else if(!strcmp(info->trap->name, "LookupAccountSidW") && agent_config.netusergetinfo.enabled == true) {
         deception_lookup_account_sid_w(vmi, info);
-    } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
+
+    } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex") && agent_config.lookupaccountsid.enabled == true) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
-    } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
+
+
+    } else if(!strcmp(info->trap->name, "SslDecryptPacket") && agent_config.icmpsendecho2ex.enabled == true) {
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
+    } else if(!strcmp(info->trap->name, "FindFirstFileA") && agent_config.findfirstornextfile.enabled == true) {
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
-    } else if(!strcmp(info->trap->name, "FindNextFileA")) {
+    } else if(!strcmp(info->trap->name, "FindNextFileA") && agent_config.findfirstornextfile.enabled == true) {
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
-    } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
+
+    } else if(!strcmp(info->trap->name, "BCryptDecrypt")  && agent_config.bcryptdecrypt.enabled == true) {
         deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
-    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
+
+    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot") && agent_config.createtoolhelp32snapshot.enabled == true) {
         deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "FilterFindFirst")) {
+        
+    } else if(!strcmp(info->trap->name, "FilterFindFirst") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "FilterFindNext")) {
+    } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
     } else {
-        std::cout << "No Handler: " << info->trap->name << "\n";
-        usermode_print(info, params->arguments, params->target);
+        std::cout << "No handler or hook disabled: " << info->trap->name << "\n";
+        //usermode_print(info, params->arguments, params->target);
     }
     ret_hooks.erase(hookID);
     drakvuf_resume(drakvuf);
@@ -441,7 +451,6 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         PRINT_DEBUG("[APIMON] Usermode hooking not supported.\n");
         return;
     }
-
     try
     {
         auto noLog = [](const auto& entry)
@@ -469,22 +478,19 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         .post_cb = on_dll_hooked,
         .extra = (void*)this
     };
+
     drakvuf_register_usermode_callback(drakvuf, &reg);  
 
     breakpoint_in_system_process_searcher bp;
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
 
     // INSERT NEW STARTUP STUFF HERE
+    std::cout << "Starting setup..." << "\n";
+    agent_config.last_update = 0;
+    // std::cout << "Connecting to Redis..." << "\n";
+    // auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
+    get_config_from_redis(&agent_config);
     std::cout << "Deceptions running and waiting for hooks..." << "\n";
-    //deception_plugin_config agent_config;
-
-    //Move Redis check to here? 
-
-    // agent_config.rtladjustprivilege.active = true;
-
-    // if(agent_config.rtladjustprivilege.active) {
-    //     std::cout << "it lives!";
-    // }
 
     // END NEW STARTUP STUFF
 }
