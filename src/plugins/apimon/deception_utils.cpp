@@ -11,6 +11,9 @@
 #include "apimon.h" 
 #include <bitset>
 #include "deception_utils.h"
+#include "deceptions.h"
+#include <ctime>
+#include <sw/redis++/redis++.h>
 #include <iconv.h>
 
 
@@ -59,4 +62,64 @@ bool vector_contains(const std::vector<int>& v, int& t)
 uint16_t swap_uint16( uint16_t val ) 
 {
     return (val << 8) | (val >> 8 );
+}
+
+
+void get_config_from_redis(deception_plugin_config* config) 
+{
+    
+    std::time_t time_now = std::time(nullptr);
+    if (config->last_update < time_now-60)           // Only update once a minute
+    {
+        try 
+        {
+        std::cout << "Connecting to Redis to update config... ";
+        auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
+        std::cout << "Connected." << "\n";
+        std::cout << "Downloading config... ";
+
+
+        config->ntcreatefile.enabled =               (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));              
+        config->ntcreatefile.target_string =         (redis.get("ntcreatefile_targetstring")).value_or("\\??\\.\\PhysicalDrive0");
+
+        config->netusergetinfo.enabled =             (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));
+        config->lookupaccountsid.enabled =           (bool)std::stoi(redis.get("lookupaccountsid_enabled").value_or("0"));
+        config->icmpsendecho2ex.enabled =            (bool)std::stoi(redis.get("icmpsendecho2ex_enabled").value_or("0"));
+        config->ssldecryptpacket.enabled =           (bool)std::stoi(redis.get("ssldecryptpacket_enabled").value_or("0"));
+        config->findfirstornextfile.enabled =        (bool)std::stoi(redis.get("findfirstornextfile_enabled").value_or("0"));
+        config->bcryptdecrypt.enabled =              (bool)std::stoi(redis.get("bcryptdecrypt_enabled").value_or("0"));
+        config->createtoolhelp32snapshot.enabled =   (bool)std::stoi(redis.get("createtoolhelp32snapshot_enabled").value_or("0"));
+        config->process32firstw.enabled =            (bool)std::stoi(redis.get("process32firstw_enabled").value_or("0"));
+        config->filterfind.enabled =                 (bool)std::stoi(redis.get("filterfind_enabled").value_or("0"));
+
+        config->last_update = time_now;
+
+        std::cout << "Done." << "\n";
+        
+        } catch (const sw::redis::Error &e) 
+        {
+            std::cout << e.what() << "\n";
+        }
+    } else {
+        std::cout << "Config up to date." << "\n";
+    }
+}
+
+
+std::vector<uint8_t> string_to_array(std::string str, bool wide){
+    std::vector<uint8_t> arr;
+    
+    if(wide == true){
+        for(char c : str) {
+            arr.push_back(c);
+            arr.push_back(0);
+        }
+    } 
+    else {
+        for(char c : str) {
+            arr.push_back(c);
+            }
+    }
+
+    return arr;
 }

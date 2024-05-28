@@ -33,7 +33,6 @@
 /// @param info 
 void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect) {  
 
-    drakvuf_pause(drakvuf);         // Move this into apimon so it's consistent? 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
     uint32_t access_mask = temp_args[1];
@@ -89,7 +88,6 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         }
 
     }
-    drakvuf_resume(drakvuf);
     
 }
 
@@ -301,7 +299,9 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
         std::string extracted_user_string = convert_user.str();
         std::cout << "Decrypted User: "<< extracted_user_string << "\n";
 
-        std::vector<uint8_t> new_username = {0x43, 0x00, 0x70, 0x00, 0x74, 0x00, 0x2E, 0x00, 0x20, 0x00, 0x57, 0x00, 0x57, 0x00, 0x00, 0x00};
+        //std::vector<uint8_t> new_username = {0x43, 0x00, 0x70, 0x00, 0x74, 0x00, 0x2E, 0x00, 0x20, 0x00, 0x57, 0x00, 0x57, 0x00, 0x00, 0x00};
+        std::string newu = "Batman";
+        std::vector<uint8_t> new_username = string_to_array(newu, true);
 
         for (uint8_t byte: new_username)
         {
