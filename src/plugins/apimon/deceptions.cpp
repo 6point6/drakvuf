@@ -117,8 +117,8 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     }
 }
 
-/*###################### NET-USER-ENUM ################################*/
 
+/* ###################### WIP UserHide ################################
 void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
@@ -165,9 +165,6 @@ if(username) {
 }
     }
 }
-
-/*###################### NET-LOCALGROUP-GETMEMBERS ################################*/
-
 void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
@@ -212,9 +209,6 @@ void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info) {
         }
     }
 }
-
-/*###################### LookupAccountSIDW ################################*/
-
 void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
@@ -264,6 +258,7 @@ void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) 
         }
     }
 }
+*/
 
 void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info* info) {
     std::cout << "Pausing guest..." << "\n";
@@ -306,7 +301,9 @@ std::cout << "Hit SslDecryptPacket function!" << "\n";
     }
     drakvuf_resume(drakvuf);
 }
-/*void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename) {
+
+/*###################### HideFile WIP ################################*/
+void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
     vmi_pid_t curr_pid = info->attached_proc_data.pid;  // Get PID of process
@@ -334,7 +331,8 @@ std::cout << "Hit SslDecryptPacket function!" << "\n";
         }
         cFileName++; // move address 1 byte
     }
-}*/
+}
+
 void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info* info, deception_plugin_config* config) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
