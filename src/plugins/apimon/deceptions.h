@@ -38,7 +38,7 @@ typedef struct deception_plugin_config* deception_plugin_config_t;
 void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect);
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info);
 
-void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info);
+void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 
 void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info);
 

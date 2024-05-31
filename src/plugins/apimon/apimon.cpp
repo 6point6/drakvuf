@@ -207,7 +207,9 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
-    /* Start: Custom Deception Code */
+
+    /*
+    // Start: Custom Deception Code
     try {
         auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
         auto val = redis.get(info->trap->name);
@@ -221,7 +223,7 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     } catch (const sw::redis::Error &e) {
         std::cout << e.what() << "\n";
     }
-
+*/
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact.
 
@@ -234,7 +236,7 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_net_user_get_info(vmi, info);
 
     } else if(!strcmp(info->trap->name, "NetUserEnum")) {
-        deception_net_user_enum(vmi, info);
+        deception_net_user_enum(vmi, info, drakvuf);
 
     } else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
         deception_net_lgrp_getmem(vmi, info);

@@ -79,7 +79,17 @@
         "cfenv": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "coroutine": "cpp"
+        "coroutine": "cpp",
+        "csignal": "cpp",
+        "scoped_allocator": "cpp",
+        "shared_mutex": "cpp",
+        "span": "cpp",
+        "typeindex": "cpp",
+        "valarray": "cpp",
+        "strstream": "cpp"
     },
-    "mesonbuild.configureOnOpen": false
+    "mesonbuild.configureOnOpen": false,
+    "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild",
+    "cmake.sourceDirectory": "/home/xen/github/6point6/drakvuf/grpc",
+    "glassit.alpha": 220
 }
