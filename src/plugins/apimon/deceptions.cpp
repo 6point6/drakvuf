@@ -120,206 +120,94 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
 
 /*###################### NET-USER-ENUM ################################*/
 
-void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf)
-{
-    // Get the data from the trap
+void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf, std::string targetUser){
+    // 0 - Init - Get the data from the trap
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;// Get args from func
     vmi_pid_t curr_pid = data->target->pid; // Get PID of process
 
-    // 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
-    uint64_t pUserInfo_0 = 0; //  To store pointer to struct array containing pointers to usernames
+    // ### 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
+    addr_t pUserInfo_0 = 0; //  To store pointer to struct array containing pointers to usernames
     addr_t bufptr = temp_args[3];
     std::cout << "    *bufptr: 0x" << std::hex << bufptr << "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_0))
-    {
+    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_0)){
         std::cout << "Error occured 1 - Reading bufptr" << "\n";
         return;
     }
     std::cout << "pUserInfo_0: 0x" << std::hex << pUserInfo_0 << "\n";
 
-    // 2 - Get addr in EntriesRead, read value at this addr, store in EntriesNum
+    // ### 2 - Get addr in EntriesRead, read value at this addr, store in EntriesNum
     uint64_t EntriesNum = 0;
     addr_t pEntriesRead = temp_args[5];
     std::cout << "    EntriesRead Pointer: 0x" << std::hex << pEntriesRead << "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, pEntriesRead, curr_pid, &EntriesNum))
-    {
+    if (VMI_FAILURE == vmi_read_64_va(vmi, pEntriesRead, curr_pid, &EntriesNum)){
         std::cout << "Error occured 2 - Reading EntriesRead" << "\n";
         return;
     }
     std::cout << "Number of Username Entries Read: " << std::dec << EntriesNum << "\n";
 
-//#######
-    uint64_t pUsri0_name = 0;
-    if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pUserInfo_0), curr_pid, &pUsri0_name))
-    {
-        std::cout << "Error occured - Reading pUserInfo_0" << "\n";
-        return;
-    }
-
-    // 3.0 - Iterate through usernames gathered, storing in array, then reading
-    std::vector<uint64_t> pUsri0_name_array;
+    // ### 3 - Iterate through usernames gathered, storing in array, then reading;
+        std::vector<uint64_t> pUsri0_name_array;
     for(uint64_t i = 0; i < EntriesNum; i++)
     {
-        // 3.1 Get pointer addr in pUserInfo_0, read value at this addr, store in pUsri0_name array - To get mem location of each username
+        // ### 4 - Get addr in pUserInfo_0, read + store in vector; move 8 bytes; read next
         uint64_t pUsri0_name = 0;
         if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pUserInfo_0 + i * 8), curr_pid, &pUsri0_name))
-        //(... + i * 8) as pointer in 64bit Win is 8 bytes
         {
-            std::cout << "Error occured 3.1 - Reading pUserInfo_0" << "\n";
+            std::cout << "Error occured 4 - Reading pUserInfo_0" << "\n";
             return;
         }
         pUsri0_name_array.push_back(pUsri0_name);
-        //std::cout << "pUsri0_name: 0x" << std::hex << pUsri0_name << "\n";
     }
-    std::cout << "\nMemory Addresses of Username Structs:\n";
-    for(const auto& name : pUsri0_name_array)
-    {
-        std::cout << "0x" << std::hex << name << std::endl;
-    }
-    std::cout << std::endl;
-
-    // 3.2 Read the values at pUsri0_name_array, 64 bytes at a time, stopping at a double null + Store these in vector, store these vectors in a matrix
-    std::vector<std::vector<uint64_t>> usrname_hex_mtrx;
+    // ### 5 - Read the values at pUsri0_name_array, 64 bytes at a time
     uint8_t usrname_hex[64] = {0};
-    for(size_t i = 0; i < pUsri0_name_array.size(); i++)
-    {
+    std::vector<std::vector<uint64_t>> usrname_hex_mtrx;
+    for(size_t i = 0; i < pUsri0_name_array.size(); i++){
         uint64_t addr = pUsri0_name_array[i];
-        if (VMI_FAILURE == vmi_read_va(vmi, addr, curr_pid, 64, usrname_hex, NULL))
-        {
-            std::cout << "Error occured - Reading values from memory";
+        if (VMI_FAILURE == vmi_read_va(vmi, addr, curr_pid, 64, usrname_hex, NULL)){
+            std::cout << "Error 5 occured - Reading values from memory" << std::endl;
             return;
         }
+        // ### 6 - Iterate bytes, push into vector, end if double null (end str); push vectors to matrix
+        std::cout << std::hex << usrname_hex << std::endl;
         std::vector<uint64_t> usrname_hex_vtr;
-        for(int j = 0; j < 63; j++)
-        {
-            if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0)
-            {
+        for(int j = 0; j < 63; j++){
+            if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0){
                 break;
             }
             usrname_hex_vtr.push_back(usrname_hex[j]);
         }
-        std::cout << std::endl;
         usrname_hex_mtrx.push_back(usrname_hex_vtr);
     }
-    std::cout << "\nUsername hex values: --------¬\n";
-    for(const auto& subvtr : usrname_hex_mtrx)
-    {
-        for(uint64_t hexval : subvtr)
-        {
+    std::cout << "\nUsername value: --------¬\n";
+    for(const auto& subvtr : usrname_hex_mtrx){
+        for(uint64_t hexval : subvtr){
             std::cout << hexval << " ";
         }
         std::cout << std::endl;
     }
-    std::cout << std::endl;
 
-// ##########################
-    // 3.3 Compare the vectors (bytes of username) within the matrix (set of usernames) to value; "null" this if found
-    std::vector<uint64_t> nullUser = {48, 0, 49, 0, 47, 0, 48, 0, 50, 0, 52, 0, 49, 0, 56};
-    // ^^^ Ascii Hex of User to be "nulled" ---> In this case "HIGHPRIV"
-
-    for(size_t i = 0; i < usrname_hex_mtrx.size(); ++i)
-    {
-        if(std::equal(nullUser.begin(), nullUser.end(), usrname_hex_mtrx.begin(), usrname_hex_mtrx.end()))
-        {
-            uint64_t target_addr = i;
-            uint64_t mem_addr = pUsri0_name_array[target_addr];
-            uint8_t dbl_Null[] = {0,0};
-            if (VMI_FAILURE != vmi_write_va(vmi, mem_addr, curr_pid, 2,dbl_Null, NULL))
-            {
+    // ### 7 - Set target user (hardcoded below); if username matches, replace with null bytes
+    std::vector<uint64_t> target_hex_vtr = {0x48, 0x0, 0x49, 0x0, 0x47, 0x0, 0x48, 0x0, 0x50, 0x0, 0x52, 0x0, 0x49, 0x0, 0x56};
+    size_t index = 0;
+    for(const auto& subvtr : usrname_hex_mtrx){
+        uint8_t dbl_Null[] = {0 ,0};
+        if (subvtr == target_hex_vtr) {
+            std::cout << "!!! USERNAME MATCH !!! ";
+            if (VMI_FAILURE != vmi_write_va(vmi, pUsri0_name_array[index], curr_pid, 2, dbl_Null, NULL)){
                 std::cout << "\n-----------------\nTarget user account hidden!\n---------------\n";
             }
-            else
-            {
-                std::cout << "Writing to memory failed!" << "\n";
+            else {
+                std::cout << "Error 7 - Writing null to memory failed" << "\n";
+                return;
             }
         }
-        else
-        {
-            std::cout << "No user match, no accounts nulled" << std::endl;
-        }
+    ++index;
     }
 }
-    // 3.4 Read the value at pUsri0_name and store usernames in a vector of strings
-/*
-    std::cout << "\nUsers Found ----¬\n";
-    std::vector<std::vector<std::string>> allStrings;
-    for (size_t i = 0; i < pUsri0_name_array.size(); ++i)
-    {
-        uint64_t addr = pUsri0_name_array[i];
-        std::vector<std::string> currStrings;
-        char* str = vmi_read_str_va(vmi, addr, curr_pid);
-        while (str != NULL && strlen(str) > 0)
-        {
-            currStrings.push_back(std::string(str));
-            //std::cout << str;
-            addr += strlen(str) + 1; // Move to the next string
-            free(str); // Free the memory allocated by vmi_read_str_va
-            str = vmi_read_str_va(vmi, addr, curr_pid);
-        }
-        allStrings.push_back(currStrings);
-        //std::cout << "\n";
-        if (str == NULL)
-        {
-            std::cout << "Error 3.2 - Reading at address: 0x" << std::hex << addr << "\n";
-        }
-        else
-        {
-            free(str);
-        }
-    }
-    for (size_t i = 0; i < allStrings.size(); ++i)
-    {
-        for (const auto& str : allStrings[i])
-        {
-            std::cout  << str;
-        }
-        std::cout << "\n";
-    }
-*/
-
-    // 3.5 Pair each username string with its mem addr
-/*
-    std::vector<std::pair<uint64_t, std::vector<std::string>>> memUser_Pair;
-    if (pUsri0_name_array.size() == allStrings.size()) {
-        for (size_t i = 0; i < pUsri0_name_array.size(); ++i) {
-            memUser_Pair.push_back(std::make_pair(pUsri0_name_array[i], allStrings[i]));
-        }
-    } else {
-        std::cout << "Error 3.3: Arrays not equal size." << "\n";
-    }
-    std::cout << "\nMemAddr-Username Pairs:--------¬\n";
-    for (const auto& pair : memUser_Pair) {
-        std::cout << "0x" << std::hex << pair.first << " ";
-        for (const auto& str : pair.second) {
-            std::cout << str;
-        }
-        std::cout << "\n";
-    }
-
-    for(auto& pair : memUser_Pair)
-    {
-        std::vector<std::string>& usernames = pair.second; // Reference to the second element of the pair
-
-        for(auto& usernameStr : usernames) {
-            if(usernameStr == "H I G H P R I V") {
-                // Replace "H I G H P R I V" with non-printable ASCII character in memory
-                uint8_t nullChar[] = {0, 0}; // UTF-16LE null character
-
-                if (VMI_FAILURE != vmi_write_va(vmi, pair.first, curr_pid, sizeof(nullChar),nullChar, NULL)) {
-                    std::cout << "\n-----------------\nHIGHPRIV account nulled!\n---------------\n";
-                } else {
-                    std::cout << "Writing to memory failed!" << "\n";
-                }
-            }
-        }
-    }
-
-}
-*/
 
 /*###################### NET-LOCALGROUP-GETMEMBERS ################################*/
-/*
+
 void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
 {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
@@ -365,10 +253,10 @@ void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
         }
     }
 }
-*/
+
 
 /*###################### LookupAccountSIDW ################################*/
-/*
+
 void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
@@ -418,7 +306,7 @@ void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) 
         }
     }
 }
-*/
+
 
 //#######################
 

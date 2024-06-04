@@ -236,7 +236,8 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_net_user_get_info(vmi, info);
 
     } else if(!strcmp(info->trap->name, "NetUserEnum")) {
-        deception_net_user_enum(vmi, info, drakvuf);
+        std::string targetUser = "HIGHPRIV"; // To do: Change from hardcoded to obtain from Redis
+        deception_net_user_enum(vmi, info, drakvuf, targetUser);
 
     } else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
         deception_net_lgrp_getmem(vmi, info);
