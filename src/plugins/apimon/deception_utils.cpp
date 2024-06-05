@@ -113,3 +113,41 @@ std::vector<uint8_t> string_to_array(std::string str, bool wide){
 
     return arr;
 }
+
+
+status_t vmi_overwrite_unicode_str_va(vmi_instance_t vmi, addr_t vaddr, vmi_pid_t pid, std::string str) {
+
+    uint16_t maxsize;
+    if (VMI_FAILURE == vmi_read_16_va(vmi, vaddr+0x2, pid, &maxsize)) {
+        std::cout << "Unable to read existing unicode string." << "\n";
+        return VMI_FAILURE;
+    }
+
+    std::vector<uint8_t> content_buffer = string_to_array(str, true);
+    
+    uint16_t size = sizeof(content_buffer);
+    if (size > maxsize) {
+        std::cout << "New string too large, unable to overwrite." << "\n";
+        return VMI_FAILURE;
+    }
+    
+    addr_t pointer;
+    if (VMI_FAILURE == vmi_read_addr_va(vmi, vaddr+0x8, pid, &pointer)) {
+        return VMI_FAILURE;
+    }
+
+    if (VMI_FAILURE == vmi_write_16_va(vmi, vaddr, pid, &size)) {
+        std::cout << "Unable to write new size." << "\n";
+        return VMI_FAILURE;
+    }
+
+    for (uint8_t byte: content_buffer){
+        if (VMI_FAILURE == vmi_write_8_va(vmi, pointer, pid, &byte)){
+            std::cout << "Unable to write new value." << "\n";
+            return VMI_FAILURE;
+        }
+        pointer++;
+    }
+
+    return VMI_SUCCESS;
+}

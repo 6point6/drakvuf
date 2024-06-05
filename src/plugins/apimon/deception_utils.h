@@ -60,5 +60,6 @@ bool vector_contains(const std::vector<int>& v, int& t);
 uint16_t swap_uint16( uint16_t val);
 void get_config_from_redis(deception_plugin_config* config);
 std::vector<uint8_t> string_to_array(std::string str, bool wide = false);
+status_t vmi_overwrite_unicode_str_va(vmi_instance_t vmi, addr_t vaddr, vmi_pid_t pid, std::string str);
 
 #endif
