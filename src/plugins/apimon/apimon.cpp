@@ -113,9 +113,16 @@
 #include "deceptions.h" // Deception code
 #include "deception_utils.h" // Deception code
 #include <sw/redis++/redis++.h>
+#include "intelgathering.h" // Intel Gathering code
 
-
+/* We create a handful of useful structs first thing so that we can use *
+ * them later and persist across callbacks.                             */
 deception_plugin_config agent_config;
+std::vector<process> process_list;
+std::vector<simple_user> user_list;
+system_info sys_info;
+
+/* END ADDITIONS                                                        */
 
 static uint64_t make_hook_id(const drakvuf_trap_info_t* info)
 {
@@ -198,11 +205,20 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
-    /* Start: Custom Deception Code */
-    
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+
+    /****** INSERTED CODE BEGINS **************/
     std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
-    get_config_from_redis(&agent_config);
+    /* CONFIG MANAGEMENT AND PERIODIC UPDATES */
+    std::time_t time_now = std::time(nullptr);
+    if (agent_config.last_update < time_now-60)           // Only update once a minute
+    {
+        std::vector<process> active_process_list = list_running_processes(vmi, &sys_info, &agent_config);
+        std::vector<simple_user> user_list = list_users(drakvuf, vmi, &sys_info);
+        get_config_from_redis(&agent_config);
+        agent_config.last_update = time_now;
+    }
+    /* DECEPTION HOOKS AND FUNCTIONS **********/
 
     if(!strcmp(info->trap->name, "NtCreateFile") && agent_config.ntcreatefile.enabled == true) {  
         deception_nt_create_file(drakvuf, vmi, info, agent_config.ntcreatefile.target_string);
@@ -219,12 +235,13 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex") && agent_config.lookupaccountsid.enabled == true) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
 
-
     } else if(!strcmp(info->trap->name, "SslDecryptPacket") && agent_config.icmpsendecho2ex.enabled == true) {
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
+        
     } else if(!strcmp(info->trap->name, "FindFirstFileA") && agent_config.findfirstornextfile.enabled == true) {
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+
     } else if(!strcmp(info->trap->name, "FindNextFileA") && agent_config.findfirstornextfile.enabled == true) {
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
@@ -240,11 +257,13 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
     } else {
-        std::cout << "No handler or hook disabled: " << info->trap->name << "\n";
-        //usermode_print(info, params->arguments, params->target);
+        std::cout << "No handler or hook disabled: " << info->trap->name << "\n"; 
     }
+    /****** INSERTED CODE ENDS *****************/
+
     ret_hooks.erase(hookID);
     drakvuf_resume(drakvuf);
+    //usermode_print(info, params->arguments, params->target);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -464,9 +483,10 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     // INSERT NEW STARTUP STUFF HERE
     std::cout << "Starting setup..." << "\n";
     agent_config.last_update = 0;
-    get_config_from_redis(&agent_config);
-    std::cout << "Deceptions running and waiting for hooks..." << "\n";
+    //get_config_from_redis(&agent_config);
 
+    std::cout << "Deceptions running and waiting for hooks..." << "\n";
+    
     // END NEW STARTUP STUFF
 }
 

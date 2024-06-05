@@ -23,6 +23,8 @@
 #include <algorithm>
 #include "deceptions.h"
 #include <iostream>
+#include "intelgathering.h"
+
 
 #define MAX_PATH 260
 
@@ -49,7 +51,7 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         vmi_pid_t curr_pid = info->attached_proc_data.pid; 
         const char* process_name = info->attached_proc_data.name;
 
-        std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+        //std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
 
         addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
         uint64_t obj_name_ustr_ptr = 0;         //Receiving variable for the response from the memory read below.
@@ -62,7 +64,6 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
         std::string target_filename = convert_ustr_to_string(target_filename_ustr); 
  
-        //std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance. 
         std::vector<uint8_t> file_to_protect_array = {};
         
         for(char ch : file_to_protect){        // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
@@ -70,11 +71,14 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
             file_to_protect_array.push_back(0);
         }
         std::string w_file_to_protect(file_to_protect_array.begin(), file_to_protect_array.end());
+        
+        std::cout << "File to Protect: " << file_to_protect << "\n";
+        std::cout << "INFO      | WRITE/DELETE to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
 
         // Catch and neutralise attempts to write to the target file (or MBR if we set this to \\??\\.\\PhysicalDrive0)
         if (target_filename == w_file_to_protect) // FUTURE: Replace this with config lookup
         {
-            std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+            //std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
             //std::cout << "Requested Access Mask is: " << std::bitset<32>(temp_args[1]) <<"\n";
 
             if (VMI_FAILURE == vmi_set_vcpureg(vmi, 0x0, RSP, info->vcpu))
@@ -638,3 +642,49 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
     // added to prevent memory leaks
     delete[] aFilterBuff;
 }
+
+void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
+    std::vector<uint64_t> temp_args = data->arguments;
+
+    std::vector<process> process_list;
+
+    if(!sysinfo.lsass_pid) {       // Handle edge-case where this runs before we have a target PID. 
+        process_list = list_running_processes(vmi, &sysinfo, config);
+    }
+
+    if((int32_t)temp_args[2] == sysinfo.lsass_pid){
+        std::cout << "LSASS Mememory Handle Opened. Enabling ReadProcessMemory Trap." << "\n";
+        config->readprocessmemory.enabled = true;
+        config->readprocessmemory.target_handle = info->regs->rax;
+    }
+
+}
+
+// void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo) {
+//     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
+//     std::vector<uint64_t> temp_args = data->arguments;
+//     // vmi_pid_t curr_pid = info->attached_proc_data.pid;
+
+//     if(temp_args[0] != config->readprocessmemory.target_handle){ // We only want to act on handles reading LSASS so break for other handles.
+//         return;
+//     }
+
+//     if(temp_args[3] > 10000) {
+//         config->readprocessmemory.active = true; // The good stuff only happens after lsasrv.dll has been cloned which is 0x19F000 in debug, so 
+//         return;                                  // we use this as another trigger to minimise excessive processing, esp. as this happens a lot.
+//     }
+
+//     if(config->readprocessmemory.active == false) { // This implies we're still before the lsasrv.dll copy, so drop out.
+//         return;
+//     }
+
+    
+
+
+
+
+
+// }
+
+

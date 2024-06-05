@@ -26,8 +26,16 @@ struct  deception_config {
         bool active;                                    // Has the function been called and has a leftover effect?
         uint64_t overwritten_instruction;               // Example parameter to persist data over callbacks 
         addr_t overwrite_address;                       // Overwrite location
-        std::string target_string;                      
-        std::string replacement_string;
+        std::string target_string;                      // Replace this with a vector so we're not wasting memory?
+        std::string replacement_string;                 // As above?
+        std::string target_string2;                      
+        std::string replacement_string2;
+        std::string target_string3;                      
+        std::string replacement_string3;
+        std::string target_string4;                      
+        std::string replacement_string4;
+        vmi_pid_t target_pid;
+        uint64_t target_handle;
     };
 
 struct deception_plugin_config {
@@ -42,6 +50,7 @@ struct deception_plugin_config {
     deception_config createtoolhelp32snapshot;
     deception_config process32firstw;
     deception_config filterfind;
+    deception_config readprocessmemory;
 };
 
 typedef struct deception_plugin_config* deception_plugin_config_t;
