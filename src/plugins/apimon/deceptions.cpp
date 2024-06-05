@@ -416,10 +416,10 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
 }
 
 void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
+    return;
     std::cout << "RAX: " << std::hex << info->regs->rax << "\n";
     addr_t list_head = 0;
     int LIST_ENTRY_BASE_OFFSET = 0x448;
-    int _HANDLE_TABLE_BASE_OFFSET = 0x18;
 
     struct _LIST_ENTRY {
         struct _LIST_ENTRY *Flink;
@@ -452,7 +452,34 @@ void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_inf
 
         if(std::string(info->attached_proc_data.name).find(std::string(ImageFileName)) != std::string::npos) {
             std::cout << "Found Attached Process: " << ImageFileName << "\n";
-            break;
+            // Get the next structure
+            addr_t _HANDLE_TABLE = _EPROCESS + 0x570;
+            addr_t HandleTableList_addr = _HANDLE_TABLE + 0x18;
+            
+            if(VMI_FAILURE == vmi_read_va(vmi, HandleTableList_addr, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
+                printf("Failed to read LIST_ENTRY\n");
+                return;
+            }
+
+            addr_t HT_END_LINK = (addr_t)HandleTableList.Blink;
+            std::cout << "Flink: " << std::hex << HandleTableList.Flink << "\n";
+            std::cout << "Blink: " << std::hex << HandleTableList.Blink << "\n";
+            while((addr_t)HandleTableList.Flink != HT_END_LINK) {
+                uint64_t TableCode;
+                if(VMI_FAILURE == vmi_read_va(vmi, _HANDLE_TABLE + 0x8, 0, sizeof(TableCode), &TableCode, NULL)) {
+                    printf("ActualEntry Failed to read next pointer.\n");
+                }
+
+                std::cout << "TableCode: " << std::hex << TableCode << "\n";
+                std::cout << "Flink: " << std::hex << HandleTableList.Flink << "\n";
+                std::cout << "Blink: " << std::hex << HandleTableList.Blink << "\n";
+
+                // Get the next structure
+                if(VMI_FAILURE == vmi_read_va(vmi, (addr_t)HandleTableList.Flink, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
+                    printf("Failed to read next pointer.\n");
+                    return;
+                }
+            }
         }
 
         // Get the next structure
@@ -461,43 +488,16 @@ void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_inf
             return;
         }
     }
-
-    addr_t _EPROCESS = (addr_t)LIST_ENTRY.Flink - LIST_ENTRY_BASE_OFFSET;
-    addr_t HandleTable = _EPROCESS + 0x570;
-    addr_t HandleTableList_addr = HandleTable + 0x18;
-
-    if(VMI_FAILURE == vmi_read_va(vmi, HandleTableList_addr, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
-        printf("Failed to read LIST_ENTRY\n");
-        return;
-    }
-
-    addr_t HT_END_LINK = (addr_t)HandleTableList.Blink;
-    while((addr_t)HandleTableList.Flink != HT_END_LINK) {
-        addr_t _HANDLE_TABLE = (addr_t)HandleTableList.Flink - _HANDLE_TABLE_BASE_OFFSET;
-        char ActualEntry[32];
-
-        if(VMI_FAILURE == vmi_read_va(vmi, _HANDLE_TABLE + 0x40, 0, sizeof(ActualEntry), &ActualEntry, NULL)) {
-            printf("ActualEntry Failed to read next pointer.\n");
-            return;
-        }
-
-        std::cout << "ActualEntry: " << ActualEntry << "\n";
-
-        // Get the next structure
-        if(VMI_FAILURE == vmi_read_va(vmi, (addr_t)HandleTableList.Flink, 0, sizeof(HandleTableList), &HandleTableList, NULL)) {
-            printf("Failed to read next pointer.\n");
-            return;
-        }
-    }
 }
 
 void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf) {
-    return;
     if(info->regs->rax == 0) { // If RAX is 0, then the function failed
         std::cout << "RAX is 0, reached end of Linked List.\n";
         return;
     }
 
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> args = data->arguments;
     struct PROCESSENTRY32W {
         uint32_t dwSize; // 4 bytes
         uint32_t cntUsage; // 4 bytes
@@ -511,62 +511,62 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         uint16_t szExeFile[MAX_PATH]; // 2 bytes * 260
     } pe32;
 
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> args = data->arguments;
 
     if(vmi_read_va(vmi, args[1], info->proc_data.pid, sizeof(pe32), &pe32, NULL) == VMI_FAILURE) {
         std::cout << "Failed to read PROCESSENTRY32W.\n";
-    } else {
-        std::cout << "dwSize: " << std::dec << pe32.dwSize << "\n";
-        std::cout << "cntUsage: " << std::dec << pe32.cntUsage << "\n";
-        std::cout << "th32ProcessID: " << std::dec << pe32.th32ProcessID << "\n";
-        std::cout << "th32DefaultHeapID: " << std::dec << pe32.th32DefaultHeapID << "\n";
-        std::cout << "th32ModuleID: " << std::dec << pe32.th32ModuleID << "\n";
-        std::cout << "cntThreads: " << std::dec << pe32.cntThreads << "\n";
-        std::cout << "th32ParentProcessID: " << std::dec << pe32.th32ParentProcessID << "\n";
-        std::cout << "pcPriClassBase: " << std::dec << pe32.pcPriClassBase << "\n";
-        std::cout << "dwFlags: " << std::dec << pe32.dwFlags << "\n";
+        return;
+    } 
+    
+    std::cout << "dwSize: " << std::dec << pe32.dwSize << "\n";
+    std::cout << "cntUsage: " << std::dec << pe32.cntUsage << "\n";
+    std::cout << "th32ProcessID: " << std::dec << pe32.th32ProcessID << "\n";
+    std::cout << "th32DefaultHeapID: " << std::dec << pe32.th32DefaultHeapID << "\n";
+    std::cout << "th32ModuleID: " << std::dec << pe32.th32ModuleID << "\n";
+    std::cout << "cntThreads: " << std::dec << pe32.cntThreads << "\n";
+    std::cout << "th32ParentProcessID: " << std::dec << pe32.th32ParentProcessID << "\n";
+    std::cout << "pcPriClassBase: " << std::dec << pe32.pcPriClassBase << "\n";
+    std::cout << "dwFlags: " << std::dec << pe32.dwFlags << "\n";
 
-        std::ostringstream convert_exefile;
-        for (ulong i = 0; i < sizeof(pe32.szExeFile); i++) {
-            if(isprint((int)pe32.szExeFile[i]) > 0) {
-                convert_exefile << (char)pe32.szExeFile[i];
-            } else {
-                break;
-            }
-        }
-
-        std::string convert_exefile_str = convert_exefile.str();
-        std::cout << "szExeFile: "<< convert_exefile_str << "\n";
-        
-        if(
-            strcmp(convert_exefile_str.c_str(), "conhost.exe") != 0 &&
-            strcmp(convert_exefile_str.c_str(), "ProcessList.exe") != 0
-        ) {
-            std::cout << "-----------\n";
-            return;
-        }
-
-        PROCESSENTRY32W pe32mod = {
-            .dwSize = pe32.dwSize,
-            .cntUsage = pe32.cntUsage,
-            .th32ProcessID = pe32.th32ProcessID,
-            .th32DefaultHeapID = pe32.th32DefaultHeapID,
-            .th32ModuleID = pe32.th32ModuleID,
-            .cntThreads = pe32.cntThreads,
-            .th32ParentProcessID = pe32.th32ParentProcessID,
-            .pcPriClassBase = pe32.pcPriClassBase,
-            .dwFlags = pe32.dwFlags,
-            .szExeFile = {0x46, 0x61, 0x6b, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x2e, 0x65, 0x78, 0x65}
-        };
-
-        if(vmi_write_va(vmi, args[1], info->proc_data.pid, sizeof(pe32mod), &pe32mod, NULL) == VMI_FAILURE) {
-            std::cout << "Failed to write PROCESSENTRY32W.\n";
+    std::ostringstream convert_exefile;
+    for (ulong i = 0; i < sizeof(pe32.szExeFile); i++) {
+        if(isprint((int)pe32.szExeFile[i]) > 0) {
+            convert_exefile << (char)pe32.szExeFile[i];
         } else {
-            std::cout << "Successfully wrote PROCESSENTRY32W.\n";
+            break;
         }
-        std::cout << "-----------\n";
     }
+
+    std::string convert_exefile_str = convert_exefile.str();
+    std::cout << "szExeFile: "<< convert_exefile_str << "\n";
+    
+    if(
+        strcmp(convert_exefile_str.c_str(), "conhost.exe") != 0 &&
+        strcmp(convert_exefile_str.c_str(), "ProcessList.exe") != 0
+    ) {
+        std::cout << "-----------\n";
+        return;
+    }
+
+    PROCESSENTRY32W pe32mod = {
+        .dwSize = pe32.dwSize,
+        .cntUsage = pe32.cntUsage,
+        .th32ProcessID = pe32.th32ProcessID,
+        .th32DefaultHeapID = pe32.th32DefaultHeapID,
+        .th32ModuleID = pe32.th32ModuleID,
+        .cntThreads = pe32.cntThreads,
+        .th32ParentProcessID = pe32.th32ParentProcessID,
+        .pcPriClassBase = pe32.pcPriClassBase,
+        .dwFlags = pe32.dwFlags,
+        .szExeFile = {0x46, 0x61, 0x6b, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x2e, 0x65, 0x78, 0x65}
+    };
+
+    if(vmi_write_va(vmi, args[1], info->proc_data.pid, sizeof(pe32mod), &pe32mod, NULL) == VMI_FAILURE) {
+        std::cout << "Failed to write PROCESSENTRY32W.\n";
+    } else {
+        std::cout << "Successfully wrote PROCESSENTRY32W.\n";
+    }
+    std::cout << "-----------\n";
+    
 }
 
 void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf)
