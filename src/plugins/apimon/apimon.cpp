@@ -234,26 +234,35 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_net_user_get_info(vmi, info);
 
     } else if(!strcmp(info->trap->name, "NetUserEnum")) {
-        deception_net_user_enum(vmi, info);
+        //deception_net_user_enum(vmi, info);
 
     } else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
-        deception_net_lgrp_getmem(vmi, info);
+        //deception_net_lgrp_getmem(vmi, info);
 
     } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
-        deception_lookup_account_sidw(vmi, info);
+        //deception_lookup_account_sidw(vmi, info);
 
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
     } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
-    /*
+    
     } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
-        uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
-        deception_find_first_or_next_file_a(vmi, info, fake_filename);
+        char filename[] = "My_secrets.zip";
+        //uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
+        uint8_t fake_filename[] = {0, 0}; // end of string - crashes colbalt strike 
+
+        //char filename[] = "My_secrets.zip";
+        //uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114, 0}; // Replace Secret_Folder with Boring_Folder
+        deception_find_first_or_next_file_a(vmi, info, filename, fake_filename);
     } else if(!strcmp(info->trap->name, "FindNextFileA")) {
-        uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
-        deception_find_first_or_next_file_a(vmi, info, fake_filename);
-    */
+        char filename[] = "My_secrets.zip";
+        //uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
+        uint8_t fake_filename[] = {0, 0}; // end of string - crashes colbalt strike 
+
+        //char filename[] = "Secret_Folder";
+        //uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114, 0}; // Replace Secret_Folder with Boring_Folder
+        deception_find_first_or_next_file_a(vmi, info, filename, fake_filename);
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
         deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
     } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
