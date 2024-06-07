@@ -15,6 +15,8 @@
 #include <ctime>
 #include <sw/redis++/redis++.h>
 #include <iconv.h>
+#include "intelgathering.h"
+#include "deception_types.h"
 
 
 /// @brief 
@@ -73,7 +75,6 @@ void get_config_from_redis(deception_plugin_config* config)
     auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
     std::cout << "Connected." << "\n";
     std::cout << "Downloading config... ";
-
 
     config->ntcreatefile.enabled =               (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));              
     config->ntcreatefile.target_string =         (redis.get("ntcreatefile_targetstring")).value_or("\\??\\\\.\\PhysicalDrive0");

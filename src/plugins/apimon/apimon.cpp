@@ -110,10 +110,12 @@
 #include "plugins/output_format.h"
 #include "apimon.h"
 #include "crypto.h"
-#include "deceptions.h" // Deception code
+
+#include "deception_types.h"
 #include "deception_utils.h" // Deception code
-#include <sw/redis++/redis++.h>
 #include "intelgathering.h" // Intel Gathering code
+#include "deceptions.h" // Deception code
+// #include <sw/redis++/redis++.h>
 
 /* We create a handful of useful structs first thing so that we can use *
  * them later and persist across callbacks.                             */
@@ -213,10 +215,21 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     std::time_t time_now = std::time(nullptr);
     if (agent_config.last_update < time_now-60)           // Only update once a minute
     {
-        std::vector<process> active_process_list = list_running_processes(vmi, &sys_info, &agent_config);
-        std::vector<simple_user> user_list = list_users(drakvuf, vmi, &sys_info);
         get_config_from_redis(&agent_config);
         agent_config.last_update = time_now;
+        std::vector<process> active_process_list = list_running_processes(vmi, &sys_info, &agent_config);
+        std::vector<simple_user> user_list = list_users(drakvuf, vmi, &sys_info);
+        for(simple_user user: user_list) 
+        {
+            std::cout << "ADDR: 0x" << std::hex << user.pstruct_addr;
+            std::cout << ". USERNAME: " << user.user_name;
+            std::cout << ". DOMAIN: " << user.domain;
+            std::cout << ". LOGON SERVER: " << user.logon_server;
+            std::cout << ". MAX USR: " << user.max_user_len;
+            std::cout << ". MAX DOM: " << user.max_domain_len;
+            std::cout << ". MAX LGS: " << user.max_logsvr_len;
+            std::cout << "\n";  
+        }
     }
     /* DECEPTION HOOKS AND FUNCTIONS **********/
 
@@ -483,7 +496,6 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     // INSERT NEW STARTUP STUFF HERE
     std::cout << "Starting setup..." << "\n";
     agent_config.last_update = 0;
-    //get_config_from_redis(&agent_config);
 
     std::cout << "Deceptions running and waiting for hooks..." << "\n";
     

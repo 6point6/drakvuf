@@ -22,7 +22,6 @@
 #include "deception_utils.h"
 #include <algorithm>
 #include "deceptions.h"
-#include <iostream>
 #include "intelgathering.h"
 
 
@@ -647,11 +646,11 @@ void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
     std::vector<uint64_t> temp_args = data->arguments;
 
-    std::vector<process> process_list;
+    // std::vector<process> process_list;
 
-    if(!sysinfo.lsass_pid) {       // Handle edge-case where this runs before we have a target PID. 
-        process_list = list_running_processes(vmi, &sysinfo, config);
-    }
+    // if(!sysinfo.lsass_pid) {       // Handle edge-case where this runs before we have a target PID. 
+    //     process_list = list_running_processes(vmi, &sysinfo, *config);
+    // }
 
     if((int32_t)temp_args[2] == sysinfo.lsass_pid){
         std::cout << "LSASS Mememory Handle Opened. Enabling ReadProcessMemory Trap." << "\n";
@@ -661,30 +660,57 @@ void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
 
 }
 
-// void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo) {
-//     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
-//     std::vector<uint64_t> temp_args = data->arguments;
-//     // vmi_pid_t curr_pid = info->attached_proc_data.pid;
+void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo,
+                                   std::vector<simple_user>* user_list, std::vector<simple_user>* new_user_list) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
+    std::vector<uint64_t> temp_args = data->arguments;
 
-//     if(temp_args[0] != config->readprocessmemory.target_handle){ // We only want to act on handles reading LSASS so break for other handles.
-//         return;
-//     }
+    if(temp_args[0] != config->readprocessmemory.target_handle){ // We only want to act on handles reading LSASS so break for other handles.
+        return;
+    }
 
-//     if(temp_args[3] > 10000) {
-//         config->readprocessmemory.active = true; // The good stuff only happens after lsasrv.dll has been cloned which is 0x19F000 in debug, so 
-//         return;                                  // we use this as another trigger to minimise excessive processing, esp. as this happens a lot.
-//     }
+    std::cout << "DEBUG | SOURCE: 0x" << temp_args[1] << " | DEST: 0x" << temp_args[2] << " | SIZE: " << std::hex << temp_args[3] << "\n";
 
-//     if(config->readprocessmemory.active == false) { // This implies we're still before the lsasrv.dll copy, so drop out.
-//         return;
-//     }
-
-    
-
-
-
+    if(temp_args[3] > 0x100000) {
+        if (config->readprocessmemory.active != true) {
+            deception_overwrite_logonsessionlist(vmi, sysinfo, user_list, new_user_list);               // Overwrite the LSL with our new values.
+            config->readprocessmemory.active = true;    // Mark that we've done this so we don't do it again. 
+            config->bcryptdecrypt.enabled = true;
+        } 
+    }
+    return;
+}
 
 
-// }
+void deception_overwrite_logonsessionlist(vmi_instance_t vmi, system_info sysinfo, std::vector<simple_user> user_list,
+                                                std::vector<simple_user> new_user_list) {
 
+    status_t success;
+    for (simple_user user: new_user_list) {
+        if(user.changed ==true) {
+            std::cout << "Overwriting LogonSessionList entry at position 0x" << std::hex << user.pstruct_addr;
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0x90, sysinfo.lsass_pid, user.user_name);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xa0, sysinfo.lsass_pid, user.domain);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xf0, sysinfo.lsass_pid, user.logon_server);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            
+            for (simple_user old_user: user_list) {
+                if (old_user.pstruct_addr == user.pstruct_addr) {
+                    old_user.changed = true;
+                }
+            }
+        }
+    } 
+}
 

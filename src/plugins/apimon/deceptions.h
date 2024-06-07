@@ -10,51 +10,10 @@
 #define DECEPTIONS_H
 
 #include <vector>
-#include <map>
-#include <memory>
-#include <unordered_map>
-#include <optional>
-#include <glib.h>
-#include <libusermode/userhook.hpp>
-#include "plugins/plugins_ex.h"
 #include "apimon.h"
 #include <libvmi/libvmi.h>
-#include <ctime>
-
-struct  deception_config {
-        bool enabled;                                   // Is the function turned on?
-        bool active;                                    // Has the function been called and has a leftover effect?
-        uint64_t overwritten_instruction;               // Example parameter to persist data over callbacks 
-        addr_t overwrite_address;                       // Overwrite location
-        std::string target_string;                      // Replace this with a vector so we're not wasting memory?
-        std::string replacement_string;                 // As above?
-        std::string target_string2;                      
-        std::string replacement_string2;
-        std::string target_string3;                      
-        std::string replacement_string3;
-        std::string target_string4;                      
-        std::string replacement_string4;
-        vmi_pid_t target_pid;
-        uint64_t target_handle;
-    };
-
-struct deception_plugin_config {
-    std::time_t last_update;
-    deception_config ntcreatefile;
-    deception_config netusergetinfo;
-    deception_config lookupaccountsid;
-    deception_config icmpsendecho2ex;
-    deception_config ssldecryptpacket;
-    deception_config findfirstornextfile;
-    deception_config bcryptdecrypt;
-    deception_config createtoolhelp32snapshot;
-    deception_config process32firstw;
-    deception_config filterfind;
-    deception_config readprocessmemory;
-};
-
-typedef struct deception_plugin_config* deception_plugin_config_t;
-
+#include "deception_types.h"
+#include "intelgathering.h"
 
 void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect);
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info);
@@ -66,5 +25,11 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
 void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
+void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo);
+void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo,
+                                   std::vector<simple_user>* user_list, std::vector<simple_user>* new_user_list);
+void deception_overwrite_logonsessionlist(vmi_instance_t vmi, system_info sysinfo, std::vector<simple_user>* user_list,
+                                                std::vector<simple_user>* new_user_list);
+
 
 #endif
