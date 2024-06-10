@@ -56,6 +56,6 @@ void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* 
 void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info* info, deception_plugin_config* config);
 void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
-void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
+void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf, std::string target, std::string& replacement_string);
 
 #endif

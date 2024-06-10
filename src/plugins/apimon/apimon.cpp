@@ -236,9 +236,13 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
         
     } else if(!strcmp(info->trap->name, "FilterFindFirst") && agent_config.filterfind.enabled == true) {
-        deception_filter_find(vmi, info, drakvuf);
+        std::string replacement_string = "MyBackup283050";
+        std::string target = "WdFilter";
+        deception_filter_find(vmi, info, drakvuf, target, replacement_string);
     } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
-        deception_filter_find(vmi, info, drakvuf);
+        std::string replacement_string = "BackupIT283050";
+        std::string target = "WdFilter";
+        deception_filter_find(vmi, info, drakvuf, target, replacement_string);
     } else {
         std::cout << "No handler or hook disabled: " << info->trap->name << "\n";
         //usermode_print(info, params->arguments, params->target);
