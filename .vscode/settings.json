@@ -81,5 +81,6 @@
         "variant": "cpp",
         "coroutine": "cpp"
     },
-    "mesonbuild.configureOnOpen": false
+    "mesonbuild.configureOnOpen": false,
+    "cmake.sourceDirectory": "/home/max/drakvuf/libvmi"
 }

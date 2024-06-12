@@ -1,0 +1,14 @@
+#pragma once
+
+#include "WinTypes.h"
+
+
+//0x4 bytes (sizeof)
+enum _PNP_WATCHDOG_TYPE
+{
+    PNP_EVENT_WORKER_WATCHDOG = 1,
+    PNP_DEVICE_COMPLETION_QUEUE_WATCHDOG = 2,
+    PNP_DELAYED_REMOVE_WORKER_WATCHDOG = 3,
+    PNP_ADD_DEVICE_WATCHDOG = 4,
+    PNP_DRIVER_ENTRY_WATCHDOG = 5
+}; 
