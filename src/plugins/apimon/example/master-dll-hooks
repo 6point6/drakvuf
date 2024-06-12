@@ -8,6 +8,8 @@ Kernel32.dll,Process32FirstW,log,HANDLE,LPPROCESSENTRY32W
 Kernel32.dll,Process32NextW,log,HANDLE,LPPROCESSENTRY32W
 FltLib.dll,FilterFindFirst,log,filter_information_class,lpvoid,dword,lpdword,lphandle
 Fltlib.dll,FilterFindNext,log,handle,filter_information_class,lpvoid,dword,lpdword
+kernel32.dll,OpenProcessStub,log,dword,bool,dword
+kernel32.dll,ReadProcessMemoryStub,log,handle,lpcvoid,lpvoid,size_t,size_t
 
 
 

@@ -22,7 +22,8 @@
 #include "deception_utils.h"
 #include <algorithm>
 #include "deceptions.h"
-#include <iostream>
+#include "intelgathering.h"
+
 #include "structs/_EPROCESS.h"
 
 #define MAX_PATH 260
@@ -50,7 +51,7 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         vmi_pid_t curr_pid = info->attached_proc_data.pid; 
         const char* process_name = info->attached_proc_data.name;
 
-        std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+        //std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
 
         addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
         uint64_t obj_name_ustr_ptr = 0;         //Receiving variable for the response from the memory read below.
@@ -63,7 +64,6 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
         std::string target_filename = convert_ustr_to_string(target_filename_ustr); 
  
-        //std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance. 
         std::vector<uint8_t> file_to_protect_array = {};
         
         for(char ch : file_to_protect){        // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
@@ -71,11 +71,14 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
             file_to_protect_array.push_back(0);
         }
         std::string w_file_to_protect(file_to_protect_array.begin(), file_to_protect_array.end());
+        
+        std::cout << "File to Protect: " << file_to_protect << "\n";
+        std::cout << "INFO      | WRITE/DELETE to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
 
         // Catch and neutralise attempts to write to the target file (or MBR if we set this to \\??\\.\\PhysicalDrive0)
         if (target_filename == w_file_to_protect) // FUTURE: Replace this with config lookup
         {
-            std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+            //std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
             //std::cout << "Requested Access Mask is: " << std::bitset<32>(temp_args[1]) <<"\n";
 
             if (VMI_FAILURE == vmi_set_vcpureg(vmi, 0x0, RSP, info->vcpu))
@@ -601,6 +604,80 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
     // added to prevent memory leaks
     delete[] aFilterBuff;
 }
+
+void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
+    std::vector<uint64_t> temp_args = data->arguments;
+
+    // std::vector<process> process_list;
+
+    // if(!sysinfo.lsass_pid) {       // Handle edge-case where this runs before we have a target PID. 
+    //     process_list = list_running_processes(vmi, &sysinfo, *config);
+    // }
+
+    if((int32_t)temp_args[2] == sysinfo.lsass_pid){
+        std::cout << "LSASS Mememory Handle Opened. Enabling ReadProcessMemory Trap." << "\n";
+        config->readprocessmemory.enabled = true;
+        config->readprocessmemory.target_handle = info->regs->rax;
+    }
+
+}
+
+void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo,
+                                   std::vector<simple_user>* user_list, std::vector<simple_user>* new_user_list) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; 
+    std::vector<uint64_t> temp_args = data->arguments;
+
+    if(temp_args[0] != config->readprocessmemory.target_handle){ // We only want to act on handles reading LSASS so break for other handles.
+        return;
+    }
+
+    std::cout << "DEBUG | SOURCE: 0x" << temp_args[1] << " | DEST: 0x" << temp_args[2] << " | SIZE: " << std::hex << temp_args[3] << "\n";
+
+    if(temp_args[3] > 0x100000) {
+        if (config->readprocessmemory.active != true) {
+            deception_overwrite_logonsessionlist(vmi, sysinfo, user_list, new_user_list);               // Overwrite the LSL with our new values.
+            config->readprocessmemory.active = true;    // Mark that we've done this so we don't do it again. 
+            config->bcryptdecrypt.enabled = true;
+        } 
+    }
+    return;
+}
+
+
+void deception_overwrite_logonsessionlist(vmi_instance_t vmi, system_info sysinfo, std::vector<simple_user> user_list,
+                                                std::vector<simple_user> new_user_list) {
+
+    status_t success;
+    for (simple_user user: new_user_list) {
+        if(user.changed ==true) {
+            std::cout << "Overwriting LogonSessionList entry at position 0x" << std::hex << user.pstruct_addr;
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0x90, sysinfo.lsass_pid, user.user_name);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xa0, sysinfo.lsass_pid, user.domain);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xf0, sysinfo.lsass_pid, user.logon_server);
+            if (success == VMI_FAILURE) {
+                std::cout << "Unable to overwrite LogonSessionList." << "\n";
+                break;
+            }
+            
+            for (simple_user old_user: user_list) {
+                if (old_user.pstruct_addr == user.pstruct_addr) {
+                    old_user.changed = true;
+                }
+            }
+        }
+    } 
+}
+
+
 
 
 /*
