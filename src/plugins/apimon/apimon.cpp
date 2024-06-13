@@ -239,6 +239,9 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     } else if((!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) && agent_config.ntcreatefile.enabled == true) {
         deception_process_32_first_w(vmi, info, drakvuf);
 
+    } else if(!strcmp(info->trap->name, "GetIpNetTable") && agent_config.getipnettable.enabled == true) {
+        deception_get_ip_net_table(vmi, info, drakvuf);
+
     } else if(!strcmp(info->trap->name, "NetUserGetInfo") && agent_config.process32firstw.enabled == true) {
         deception_net_user_get_info(vmi, info);
 

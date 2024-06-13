@@ -79,8 +79,14 @@
         "cfenv": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "coroutine": "cpp"
+        "coroutine": "cpp",
+        "_70_exception": "cpp",
+        "_70_new": "cpp",
+        "_70_xstddef": "cpp",
+        "xstddef": "cpp",
+        "typeindex": "cpp"
     },
     "mesonbuild.configureOnOpen": false,
-    "cmake.sourceDirectory": "/home/max/drakvuf/libvmi"
+    "cmake.sourceDirectory": "/home/max/drakvuf/libvmi",
+    "C_Cpp.errorSquiggles": "enabled"
 }

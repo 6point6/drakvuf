@@ -87,6 +87,7 @@ void get_config_from_redis(deception_plugin_config* config)
     config->createtoolhelp32snapshot.enabled =   (bool)std::stoi(redis.get("createtoolhelp32snapshot_enabled").value_or("0"));
     config->process32firstw.enabled =            (bool)std::stoi(redis.get("process32firstw_enabled").value_or("0"));
     config->filterfind.enabled =                 (bool)std::stoi(redis.get("filterfind_enabled").value_or("0"));
+    config->getipnettable.enabled =              (bool)std::stoi(redis.get("getipnettable_enabled").value_or("0"));
 
     std::cout << "Done." << "\n";
     
