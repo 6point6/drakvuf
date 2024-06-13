@@ -70,14 +70,18 @@ struct deception_plugin_config {
     deception_config createtoolhelp32snapshot;
     deception_config process32firstw;
     deception_config filterfind;
+    deception_config openprocess;
     deception_config readprocessmemory;
 };
 
 typedef struct deception_plugin_config* deception_plugin_config_t;
 
 typedef struct process {
-  std::string name;
-  vmi_pid_t pid;
+    addr_t p_addr;
+    addr_t flink;
+    addr_t blink; 
+    std::string name;
+    vmi_pid_t pid;
 } process;
 
 typedef struct LUID {
@@ -143,6 +147,8 @@ typedef struct system_info {
 
 typedef struct simple_user {
 	addr_t pstruct_addr;
+    addr_t flink;
+    addr_t blink;
 	std::string user_name;
 	uint16_t max_user_len;
 	std::string domain;

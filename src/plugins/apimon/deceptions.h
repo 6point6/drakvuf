@@ -28,8 +28,6 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_
 void deception_openprocess(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo);
 void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf, deception_plugin_config* config, system_info sysinfo,
                                    std::vector<simple_user>* user_list, std::vector<simple_user>* new_user_list);
-void deception_overwrite_logonsessionlist(vmi_instance_t vmi, system_info sysinfo, std::vector<simple_user>* user_list,
-                                                std::vector<simple_user>* new_user_list);
 
 
 #endif

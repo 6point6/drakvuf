@@ -122,6 +122,7 @@
 deception_plugin_config agent_config;
 std::vector<process> process_list;
 std::vector<simple_user> user_list;
+std::vector<simple_user> new_user_list;
 system_info sys_info;
 
 /* END ADDITIONS                                                        */
@@ -210,26 +211,15 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     vmi_instance_t vmi = vmi_lock_guard(drakvuf);
 
     /****** INSERTED CODE BEGINS **************/
-    std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
+    //std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
     /* CONFIG MANAGEMENT AND PERIODIC UPDATES */
     std::time_t time_now = std::time(nullptr);
     if (agent_config.last_update < time_now-60)           // Only update once a minute
     {
         get_config_from_redis(&agent_config);
         agent_config.last_update = time_now;
-        std::vector<process> active_process_list = list_running_processes(vmi, &sys_info, &agent_config);
-        std::vector<simple_user> user_list = list_users(drakvuf, vmi, &sys_info);
-        for(simple_user user: user_list) 
-        {
-            std::cout << "ADDR: 0x" << std::hex << user.pstruct_addr;
-            std::cout << ". USERNAME: " << user.user_name;
-            std::cout << ". DOMAIN: " << user.domain;
-            std::cout << ". LOGON SERVER: " << user.logon_server;
-            std::cout << ". MAX USR: " << user.max_user_len;
-            std::cout << ". MAX DOM: " << user.max_domain_len;
-            std::cout << ". MAX LGS: " << user.max_logsvr_len;
-            std::cout << "\n";  
-        }
+        std::vector<process> active_process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        std::vector<simple_user> user_list = list_users(drakvuf, vmi, info, &sys_info);
     }
     /* DECEPTION HOOKS AND FUNCTIONS **********/
 
@@ -269,8 +259,23 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_filter_find(vmi, info, drakvuf);
     } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
+    
+    } else if(!strcmp(info->trap->name, "OpenProcessStub") && agent_config.openprocess.enabled == true) {
+        deception_openprocess(vmi, info, drakvuf, &agent_config, sys_info);
+
+    } else if(!strcmp(info->trap->name, "ReadProcessMemoryStub") && agent_config.readprocessmemory.enabled == true) {
+        deception_readprocessmemory(vmi, info, drakvuf, &agent_config, sys_info, &user_list, &new_user_list);
+
     } else {
-        std::cout << "No handler or hook disabled: " << info->trap->name << "\n"; 
+        //std::cout << "No handler or hook disabled: " << info->trap->name << "\n";
+        std::cout << "{";
+            std::cout << "\"timestamp\": "      << std::dec << time_now             << ", "; 
+            std::cout << "\"type\": "           << "\"event_hook\""                 << ", ";
+            std::cout << "\"event\": "          << "\"" << info->trap->name << "\"" << ", ";
+            std::cout << "\"event_id\": "       << "\"" << info->event_uid  << "\"" << ", ";
+            std::cout << "\"action\": "         << "\"NONE\""                       << ", ";
+            std::cout << "\"message\": "        << "\"No handler or hook disabled\"";
+        std::cout << "}" << "\n"; 
     }
     /****** INSERTED CODE ENDS *****************/
 
@@ -494,16 +499,40 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
 
     // INSERT NEW STARTUP STUFF HERE
-    std::cout << "Starting setup..." << "\n";
     agent_config.last_update = 0;
 
-    std::cout << "Deceptions running and waiting for hooks..." << "\n";
+    simple_user xuser;
+
+    xuser.pstruct_addr = 0x20395271940;
+    xuser.user_name = "Batman";
+    xuser.domain = "LAPTOP-V13TN4M";
+    xuser.logon_server = "LAPTOP-V13TN4M2";
+    xuser.changed = true;
+
+    new_user_list.push_back(xuser);
+
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_start\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        << ", ";
+        std::cout << "\"message\": "        << "\"Deceptions running and waiting for hooks.\"" ;
+    std::cout << "}" << "\n"; 
     
     // END NEW STARTUP STUFF
 }
 
 bool apimon::stop_impl()
 {
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_stop\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        ;
+    std::cout << "}" << "\n";
+     
     return drakvuf_stop_userhooks(drakvuf) && pluginex::stop_impl();
 }
 

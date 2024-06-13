@@ -27,6 +27,7 @@ if get_option('plugin-apimon')
     plugin_sources += 'apimon/crypto.cpp'
     plugin_sources += 'apimon/deceptions.cpp'
     plugin_sources += 'apimon/deception_utils.cpp'
+    plugin_sources += 'apimon/intelgathering.cpp'
 
     config_h.set('ENABLE_PLUGIN_APIMON', 1)
 endif

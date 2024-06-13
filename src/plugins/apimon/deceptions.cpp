@@ -681,36 +681,3 @@ void deception_readprocessmemory(vmi_instance_t vmi, drakvuf_trap_info *info, dr
     return;
 }
 
-
-void deception_overwrite_logonsessionlist(vmi_instance_t vmi, system_info sysinfo, std::vector<simple_user> user_list,
-                                                std::vector<simple_user> new_user_list) {
-
-    status_t success;
-    for (simple_user user: new_user_list) {
-        if(user.changed ==true) {
-            std::cout << "Overwriting LogonSessionList entry at position 0x" << std::hex << user.pstruct_addr;
-            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0x90, sysinfo.lsass_pid, user.user_name);
-            if (success == VMI_FAILURE) {
-                std::cout << "Unable to overwrite LogonSessionList." << "\n";
-                break;
-            }
-            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xa0, sysinfo.lsass_pid, user.domain);
-            if (success == VMI_FAILURE) {
-                std::cout << "Unable to overwrite LogonSessionList." << "\n";
-                break;
-            }
-            success = vmi_overwrite_unicode_str_va(vmi, user.pstruct_addr + 0xf0, sysinfo.lsass_pid, user.logon_server);
-            if (success == VMI_FAILURE) {
-                std::cout << "Unable to overwrite LogonSessionList." << "\n";
-                break;
-            }
-            
-            for (simple_user old_user: user_list) {
-                if (old_user.pstruct_addr == user.pstruct_addr) {
-                    old_user.changed = true;
-                }
-            }
-        }
-    } 
-}
-
