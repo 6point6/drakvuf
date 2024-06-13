@@ -59,7 +59,7 @@ struct  deception_config {
     };
 
 struct deception_plugin_config {
-    std::time_t last_update;
+    time_t last_update;
     deception_config ntcreatefile;
     deception_config netusergetinfo;
     deception_config lookupaccountsid;
@@ -72,6 +72,7 @@ struct deception_plugin_config {
     deception_config filterfind;
     deception_config openprocess;
     deception_config readprocessmemory;
+    deception_config getipnettable;
 };
 
 typedef struct deception_plugin_config* deception_plugin_config_t;

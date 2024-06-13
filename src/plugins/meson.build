@@ -29,6 +29,18 @@ if get_option('plugin-apimon')
     plugin_sources += 'apimon/deception_utils.cpp'
     plugin_sources += 'apimon/intelgathering.cpp'
 
+    plugin_sources += 'apimon/deceptions/bcrypt_decrypt.cpp'
+    plugin_sources += 'apimon/deceptions/create_tool_help_32_snapshot.cpp'
+    plugin_sources += 'apimon/deceptions/filter_find.cpp'
+    plugin_sources += 'apimon/deceptions/find_first_or_next_file_a.cpp'
+    plugin_sources += 'apimon/deceptions/get_ip_net_table.cpp'
+    plugin_sources += 'apimon/deceptions/icmp_send_echo_2_ex.cpp'
+    plugin_sources += 'apimon/deceptions/lookup_account_sid_w.cpp'
+    plugin_sources += 'apimon/deceptions/net_user_get_info.cpp'
+    plugin_sources += 'apimon/deceptions/nt_create_file.cpp'
+    plugin_sources += 'apimon/deceptions/process_32_first_w.cpp'
+    plugin_sources += 'apimon/deceptions/ssl_decrypt_packet.cpp'
+
     config_h.set('ENABLE_PLUGIN_APIMON', 1)
 endif
 

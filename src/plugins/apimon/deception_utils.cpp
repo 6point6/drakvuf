@@ -91,29 +91,22 @@ void get_config_from_redis(deception_plugin_config* config)
         //std::cout << "Connected." << "\n";
         //std::cout << "Downloading config... ";
 
-        config->ntcreatefile.enabled =               (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));              
-        config->ntcreatefile.target_string =         (redis.get("ntcreatefile_targetstring")).value_or("\\??\\\\.\\PhysicalDrive0");
-        config->netusergetinfo.enabled =             (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));
-        config->lookupaccountsid.enabled =           (bool)std::stoi(redis.get("lookupaccountsid_enabled").value_or("0"));
-        config->icmpsendecho2ex.enabled =            (bool)std::stoi(redis.get("icmpsendecho2ex_enabled").value_or("0"));
-        config->ssldecryptpacket.enabled =           (bool)std::stoi(redis.get("ssldecryptpacket_enabled").value_or("0"));
-        config->findfirstornextfile.enabled =        (bool)std::stoi(redis.get("findfirstornextfile_enabled").value_or("0"));
-        config->bcryptdecrypt.enabled =              (bool)std::stoi(redis.get("bcryptdecrypt_enabled").value_or("0"));
-        config->createtoolhelp32snapshot.enabled =   (bool)std::stoi(redis.get("createtoolhelp32snapshot_enabled").value_or("0"));
-        config->process32firstw.enabled =            (bool)std::stoi(redis.get("process32firstw_enabled").value_or("0"));
-        config->filterfind.enabled =                 (bool)std::stoi(redis.get("filterfind_enabled").value_or("0"));
-        config->openprocess.enabled =                (bool)std::stoi(redis.get("openprocess_enabled").value_or("0"));
-        config->readprocessmemory.enabled =          (bool)std::stoi(redis.get("readprocessmemory_enabled").value_or("0"));
+    config->ntcreatefile.enabled =               (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));              
+    config->ntcreatefile.target_string =         (redis.get("ntcreatefile_targetstring")).value_or("\\??\\\\.\\PhysicalDrive0");
+    config->netusergetinfo.enabled =             (bool)std::stoi(redis.get("ntcreatefile_enabled").value_or("0"));
+    config->lookupaccountsid.enabled =           (bool)std::stoi(redis.get("lookupaccountsid_enabled").value_or("0"));
+    config->icmpsendecho2ex.enabled =            (bool)std::stoi(redis.get("icmpsendecho2ex_enabled").value_or("0"));
+    config->ssldecryptpacket.enabled =           (bool)std::stoi(redis.get("ssldecryptpacket_enabled").value_or("0"));
+    config->findfirstornextfile.enabled =        (bool)std::stoi(redis.get("findfirstornextfile_enabled").value_or("0"));
+    config->bcryptdecrypt.enabled =              (bool)std::stoi(redis.get("bcryptdecrypt_enabled").value_or("0"));
+    config->createtoolhelp32snapshot.enabled =   (bool)std::stoi(redis.get("createtoolhelp32snapshot_enabled").value_or("0"));
+    config->process32firstw.enabled =            (bool)std::stoi(redis.get("process32firstw_enabled").value_or("0"));
+    config->filterfind.enabled =                 (bool)std::stoi(redis.get("filterfind_enabled").value_or("0"));
+    config->openprocess.enabled =                (bool)std::stoi(redis.get("openprocess_enabled").value_or("0"));
+    config->readprocessmemory.enabled =          (bool)std::stoi(redis.get("readprocessmemory_enabled").value_or("0"));
+    config->getipnettable.enabled =              (bool)std::stoi(redis.get("getipnettable_enabled").value_or("0"));
 
-        //std::cout << "Done." << "\n";
-        
-
-        std::cout << "{";
-                std::cout << "\"timestamp\": "      << std::dec << time_now             << ", "; 
-                std::cout << "\"type\": "           << "\"config_update\""              << ", ";
-                std::cout << "\"action\": "         << "\"SUCCESS\""                    << ", ";
-                std::cout << "\"message\": "        << "\"Config updated successfully.\"";
-        std::cout << "}" << "\n";
+    std::cout << "Done." << "\n";
     
     } catch (const sw::redis::Error &e) 
     {
