@@ -118,7 +118,7 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     }
 }
 
-/*###################### NET-USER-ENUM ################################*/
+/*###################### NetUserEnum ################################*/
 
 void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf, std::string targetUser){
     // 0 - Init - Get the data from the trap
@@ -126,25 +126,39 @@ void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvu
     std::vector<uint64_t> temp_args = data->arguments;// Get args from func
     vmi_pid_t curr_pid = data->target->pid; // Get PID of process
 
+    uint32_t net_api_status = info->regs->rax;
+
     // ### 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
     addr_t pUserInfo_0 = 0; //  To store pointer to struct array containing pointers to usernames
     addr_t bufptr = temp_args[3];
-    std::cout << "    *bufptr: 0x" << std::hex << bufptr << "\n";
+    std::cout << "DEBUG >>>>>>>>>> *bufptr: 0x" << std::hex << bufptr << "\n";
     if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_0)){
         std::cout << "Error occured 1 - Reading bufptr" << "\n";
         return;
     }
-    std::cout << "pUserInfo_0: 0x" << std::hex << pUserInfo_0 << "\n";
+    std::cout << "DEBUG >>>>>>>>>> pUserInfo_0: 0x" << std::hex << pUserInfo_0 << std::endl;
 
     // ### 2 - Get addr in EntriesRead, read value at this addr, store in EntriesNum
     uint64_t EntriesNum = 0;
     addr_t pEntriesRead = temp_args[5];
-    std::cout << "    EntriesRead Pointer: 0x" << std::hex << pEntriesRead << "\n";
+    std::cout << "DEBUG >>>>>>>>>> EntriesRead Pointer: 0x" << std::hex << pEntriesRead << "\n";
     if (VMI_FAILURE == vmi_read_64_va(vmi, pEntriesRead, curr_pid, &EntriesNum)){
         std::cout << "Error occured 2 - Reading EntriesRead" << "\n";
         return;
     }
     std::cout << "Number of Username Entries Read: " << std::dec << EntriesNum << "\n";
+    /*
+    uint64_t NewEntriesNum = EntriesNum - 1;
+    std::cout << "DEBUG >>>>>>>>>> New entries Number: " << NewEntriesNum << std::endl;
+    //addr_t pEntriesRead = temp_args[5];
+    if (VMI_FAILURE != vmi_write_addr_va(vmi, pEntriesRead, curr_pid, &NewEntriesNum)){
+        std::cout << "DEBUG >>>>>>>>>> Entries Read Changed " << std::endl;
+    }
+    else {
+        std::cout << "Error 7.1 - Writing to EntriesRead" << std::endl;
+        return;
+    }
+    */
 
     // ### 3 - Iterate through usernames gathered, storing in array, then reading;
         std::vector<uint64_t> pUsri0_name_array;
@@ -169,7 +183,6 @@ void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvu
             return;
         }
         // ### 6 - Iterate bytes, push into vector, end if double null (end str); push vectors to matrix
-        std::cout << std::hex << usrname_hex << std::endl;
         std::vector<uint64_t> usrname_hex_vtr;
         for(int j = 0; j < 63; j++){
             if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0){
@@ -179,36 +192,148 @@ void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvu
         }
         usrname_hex_mtrx.push_back(usrname_hex_vtr);
     }
-    std::cout << "\nUsername value: --------¬\n";
+    /*std::cout << "\nUsername value: --------¬\n";
     for(const auto& subvtr : usrname_hex_mtrx){
         for(uint64_t hexval : subvtr){
             std::cout << hexval << " ";
         }
         std::cout << std::endl;
-    }
+    }*/
 
     // ### 7 - Set target user (hardcoded below); if username matches, replace with null bytes
     std::vector<uint64_t> target_hex_vtr = {0x48, 0x0, 0x49, 0x0, 0x47, 0x0, 0x48, 0x0, 0x50, 0x0, 0x52, 0x0, 0x49, 0x0, 0x56};
-    size_t index = 0;
+    size_t i = 0;
+    std::cout << "DEBUG >>>>>>>>>> Attempting username match..." << std::endl;
     for(const auto& subvtr : usrname_hex_mtrx){
-        uint8_t dbl_Null[] = {0 ,0};
         if (subvtr == target_hex_vtr) {
-            std::cout << "!!! USERNAME MATCH !!! ";
-            if (VMI_FAILURE != vmi_write_va(vmi, pUsri0_name_array[index], curr_pid, 2, dbl_Null, NULL)){
+            std::cout << "\n-----------------\n!!! USERNAME MATCH !!!\n-----------------" << std::endl;
+            //
+            addr_t jmp_addr = (addr_t)pUserInfo_0 + ((i+1) * 8);
+            addr_t ptr_loc = (pUserInfo_0 + i * 8);
+            //if (VMI_FAILURE != vmi_write_va(vmi, pUsri0_name_array[i], curr_pid, 2, dbl_Null, NULL))
+            if (VMI_FAILURE != vmi_write_addr_va(vmi, ptr_loc, curr_pid, &jmp_addr)){
                 std::cout << "\n-----------------\nTarget user account hidden!\n---------------\n";
             }
             else {
-                std::cout << "Error 7 - Writing null to memory failed" << "\n";
+                std::cout << "Error 7.1 - Skipping matched user addr" << std::endl;
                 return;
             }
+            //
+            std::string api_status_str = std::to_string(net_api_status);
+            std::cout << "DEBUG >>>>>>>>>> net_api_status : " << std::hex << api_status_str << std::endl;
+            //
+            /*
+            addr_t final_entr = (pUserInfo_0 + (EntriesNum * 8));
+            //uint8_t dbl_Null[] = {0, 0};
+            if (VMI_FAILURE != vmi_write_addr_va(vmi, final_entr, curr_pid, &end_addr)){
+                std::cout << "DEBUG >>>>>>>>>> Overwritten final entr with end func addr" << std::endl;
+            }
+            else {
+                std::cout << "Error 7.2 - Writing null to memory failed" << std::endl;
+                return;
+            }
+            */
         }
-    ++index;
+    ++i;
     }
 }
 
-/*###################### NET-LOCALGROUP-GETMEMBERS ################################*/
+/*###################### NetQueryDisplayInformation ################################*/
 
-void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
+/*
+NET_API_STATUS NET_API_FUNCTION NetQueryDisplayInformation(
+  [in]  LPCWSTR ServerName,
+  [in]  DWORD   Level,
+  [in]  DWORD   Index,
+  [in]  DWORD   EntriesRequested,
+  [in]  DWORD   PreferredMaximumLength,
+  [out] LPDWORD ReturnedEntryCount,
+  [out] PVOID   *SortedBuffer
+);
+
+typedef struct _NET_DISPLAY_USER {
+  LPWSTR usri1_name;
+  LPWSTR usri1_comment;
+  DWORD  usri1_flags;
+  LPWSTR usri1_full_name;
+  DWORD  usri1_user_id;
+  DWORD  usri1_next_index;
+} NET_DISPLAY_USER, *PNET_DISPLAY_USER;
+*/
+
+void deception_net_query_display_info(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf){
+    // 0 - Init - Get the data from the trap
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
+    std::vector<uint64_t> temp_args = data->arguments;
+    vmi_pid_t curr_pid = data->target->pid;
+
+    /* ## Below not needed as can use arg directly? ###
+    // ### 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
+    addr_t pSortBuffr_0 = 0;
+    //addr_t sortBuffr_arg = temp_args[6];
+    std::cout << "    *bufptr: 0x" << std::hex << temp_args[6]<< "\n";
+    if (VMI_FAILURE == vmi_read_64_va(vmi, temp_args[6], curr_pid, &pSortBuffr_0)){
+        std::cout << "Error occured 1 - Reading bufptr" << "\n";
+        return;
+    }
+    std::cout << "pUserInfo_0: 0x" << std::hex << pUserInfo_0 << "\n";
+    */
+
+    // ### 2 - Get addr in ReturnedEntryCount, read value at this addr, store in EntriesNum
+    uint64_t EntriesNum = 0;
+    //addr_t pEntriesRead = temp_args[5];
+    std::cout << "    EntriesRead Pointer: 0x" << std::hex << temp_args[5] << "\n";
+    if (VMI_FAILURE == vmi_read_64_va(vmi, temp_args[5], curr_pid, &EntriesNum)){
+        std::cout << "Error occured 2 - Reading EntriesReturned" << "\n";
+        return;
+    }
+    std::cout << "Number of User Entries Read: " << std::dec << EntriesNum << "\n";
+
+   // ### Copied below from above concept - WIP ##
+   // ### 3 - Iterate through usernames gathered, storing in array, then reading;
+        std::vector<uint64_t> usri1_name_vtr;
+    for(uint64_t i = 0; i < EntriesNum; i++)
+    {
+        // ### 4 - Get addr in pUserInfo_0, read + store in vector; move 8 bytes; read next
+        uint64_t pUsri1_name = 0;
+        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(temp_args[6] + i * 36), curr_pid, &pUsri1_name)) // Struct is of size 36 bytes <-- LPWSTR(8)*3 + DWORD(4)*3 = 36
+        {
+            std::cout << "Error occured 4 - pUsri1_name" << "\n";
+            return;
+        }
+        usri1_name_vtr.push_back(pUsri1_name);
+    }
+    // ### 5 - Read the values at pUsri0_name_array, 64 bytes at a time
+    uint8_t usrname_hex[64] = {0};
+    std::vector<std::vector<uint64_t>> usr1_name_hex_mtrx;
+    for(size_t i = 0; i < usri1_name_vtr.size(); i++){
+        uint64_t addr = usri1_name_vtr[i];
+        if (VMI_FAILURE == vmi_read_va(vmi, addr, curr_pid, 64, usrname_hex, NULL)){
+            std::cout << "Error 5 occured - Reading values from memory" << std::endl;
+            return;
+        }
+        // ### 6 - Iterate bytes, push into vector, end if double null (end str); push vectors to matrix
+        std::cout << std::hex << usrname_hex << std::endl;
+        std::vector<uint64_t> usrname_hex_vtr;
+        for(int j = 0; j < 63; j++){
+            if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0){
+                break;
+            }
+            usrname_hex_vtr.push_back(usrname_hex[j]);
+        }
+        usr1_name_hex_mtrx.push_back(usrname_hex_vtr);
+    }
+    std::cout << "\nUsername values: --------¬\n";
+    for(const auto& subvtr : usr1_name_hex_mtrx){
+        for(uint64_t hexval : subvtr){
+            std::cout << hexval << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+/*###################### NetLocalGroupGetMembers ################################*/
+/*void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
 {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
@@ -253,11 +378,10 @@ void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
         }
     }
 }
-
+*/
 
 /*###################### LookupAccountSIDW ################################*/
-
-void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
+/*void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
 
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
@@ -306,7 +430,7 @@ void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) 
         }
     }
 }
-
+*/
 
 //#######################
 

@@ -234,17 +234,15 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_process_32_first_w(vmi, info, drakvuf);
     } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
         deception_net_user_get_info(vmi, info);
-
     } else if(!strcmp(info->trap->name, "NetUserEnum")) {
         std::string targetUser = "HIGHPRIV"; // To do: Change from hardcoded to obtain from Redis
         deception_net_user_enum(vmi, info, drakvuf, targetUser);
-
-    } else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
-        deception_net_lgrp_getmem(vmi, info);
-
-    } else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
-        deception_lookup_account_sidw(vmi, info);
-
+    } else if(!strcmp(info->trap->name, "NetQueryDisplayInformation")) {
+        deception_net_query_display_info(vmi, info, drakvuf);
+    //} else if(!strcmp(info->trap->name, "NetLocalGroupEnum")) {
+    //    deception_net_lgrp_getmem(vmi, info);
+    //} else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
+    //    deception_lookup_account_sidw(vmi, info);
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
         deception_icmp_send_echo_2_ex(drakvuf, info);
     } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
