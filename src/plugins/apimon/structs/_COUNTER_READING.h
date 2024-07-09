@@ -1,0 +1,13 @@
+#pragma once
+
+#include "WinTypes.h"
+#include "_HARDWARE_COUNTER_TYPE.h"
+
+//0x18 bytes (sizeof)
+struct _COUNTER_READING
+{
+    enum _HARDWARE_COUNTER_TYPE Type;                                       //0x0
+    ULONG Index;                                                            //0x4
+    ULONGLONG Start;                                                        //0x8
+    ULONGLONG Total;                                                        //0x10
+}; 

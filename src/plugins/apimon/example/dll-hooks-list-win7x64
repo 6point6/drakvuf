@@ -299,3 +299,8 @@ cryptsp.dll,CryptEnumProvidersA,log,dword,dword,dword,dword,lpstr,dword
 cryptsp.dll,CryptEnumProvidersW,log,dword,dword,dword,dword,lpwstr,dword
 kernel32.dll,VirtualFree,log,handle,lpvoid,size_t,dword
 ntdll.dll,RtlSecureZeroMemory,log,lpvoid,size_t
+ntdll.dll,NtCreateFile,log,phandle,access_mask,pobject_attributes,pio_status_block,plarge_integer,ulong,ulong,ulong,ulong,pvoid,ulong
+
+advapi32.dll,ClearEventLogW,log,handle,lpcwstr
+ntdll.dll,RtlAdjustPrivilege,log,ulong,boolean,boolean,pboolean
+ntdll.dll,NtAdjustPrivilegesToken,log,handle,boolean,ptoken_privileges,ulong,ptoken_privileges,pulong

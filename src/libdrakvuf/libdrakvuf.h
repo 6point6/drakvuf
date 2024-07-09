@@ -241,7 +241,7 @@ typedef struct drakvuf_trap_info
 } drakvuf_trap_info_t;
 
 #define UNLIMITED_TTL 0
-#define TRAP_TTL_RESET_INTERVAL_SEC 10
+#define TRAP_TTL_RESET_INTERVAL_SEC 0
 
 struct drakvuf_trap
 {

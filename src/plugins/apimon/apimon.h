@@ -114,6 +114,7 @@
 #include <glib.h>
 #include <libusermode/userhook.hpp>
 #include "plugins/plugins_ex.h"
+#include "deception_types.h"
 
 struct apimon_config
 {
@@ -126,6 +127,12 @@ struct apimon_module
     std::string name;
     addr_t base;
     size_t size;
+};
+
+struct ApimonReturnHookData : PluginResult //Moved here from the CPP
+{
+    std::vector<uint64_t> arguments;
+    hook_target_entry_t* target = nullptr;
 };
 
 class apimon: public pluginex
@@ -142,6 +149,9 @@ public:
     std::optional<std::string> resolve_module(drakvuf_t drakvuf, addr_t process, addr_t addr, vmi_pid_t pid);
 
     event_response_t usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* info);
+
+    event_response_t ki_system_service_handler_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
+    std::unique_ptr<libhook::SyscallHook> kiSystemServiceHandlerHook;
 
     void usermode_print(drakvuf_trap_info*, std::vector<uint64_t>&, hook_target_entry_t*);
 

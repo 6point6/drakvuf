@@ -111,17 +111,22 @@
 #include "apimon.h"
 #include "crypto.h"
 
+#include "deception_types.h"
+#include "deception_utils.h" // Deception code
+#include "intelgathering.h" // Intel Gathering code
+#include "deceptions.h" // Deception code
+// #include <sw/redis++/redis++.h>
+#include "plugins/codemon/codemon.h"
 
-namespace
-{
+/* We create a handful of useful structs first thing so that we can use *
+ * them later and persist across callbacks.                             */
+deception_plugin_config agent_config;
+std::vector<process> process_list;
+std::vector<simple_user> user_list;
+std::vector<simple_user> new_user_list;
+system_info sys_info;
 
-struct ApimonReturnHookData : PluginResult
-{
-    std::vector<uint64_t> arguments;
-    hook_target_entry_t* target = nullptr;
-};
-
-};
+/* END ADDITIONS                                                        */
 
 static uint64_t make_hook_id(const drakvuf_trap_info_t* info)
 {
@@ -201,199 +206,84 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     if (!params->verifyResultCallParams(drakvuf, info))
         return VMI_EVENT_RESPONSE_NONE;
-
-    usermode_print(info, params->arguments, params->target);
-
-       /**### Explaination of PoC
-     * @win-usermode-poc
-     *
-     *
-     * Modify username value of (_USER_INFO_3) struct when
-     * NetUserGetInfo function is called on Windows 10.
-     *
-     * Idea:
-     *
-     * 1. When NetUserGetInfo() is called, read memory
-     *    address of (*bufptr) and store the value
-     * 2. Read the memory address that points to (_USER_INFO_3)
-     * 3. Read the memory address that points to (usri3_name)
-     * 4. Replace the original usri3_name value with fake data
-     * 5. Return the function with the modified buffer
-     *
-     * Windows functions
-     *
-     *  NET_API_STATUS NET_API_FUNCTION NetUserGetInfo(
-     *       [in]  LPCWSTR servername,
-     *       [in]  LPCWSTR username,
-     *       [in]  DWORD   level,  // default is 3 (_USER_INFO_3)
-     *       [out] LPBYTE  *bufptr // pointer to struct
-     *  );
-     *
-     *  typedef struct _USER_INFO_3 {
-     *      LPWSTR usri3_name;    // pointer
-     *      LPWSTR usri3_password;
-     *      DWORD  usri3_password_age;
-     *      ...
-     */
-
-    // Only modify specific functions
-    if (!strcmp(info->trap->name, "NetUserGetInfo"))
-    {
-        std::cout << "Hit NetUserGetInfo function" << "\n";
-
-    // Get the data from the trap
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
-
-        // Print the address of the 4th arg
-        std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
-
-        //int some_addr = temp_args[3];
-        vmi_pid_t curr_pid = data->target->pid;
-
-        // Store address of bufptr
-        addr_t bufptr = temp_args[3];
-        // Store address of User_Info_3 struct
-        uint64_t pUserInfo_3 = 0;
-        // Store address of Usri3_name struct
-        uint64_t pUsri3_name = 0;
-
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-        // Read address at pointer (arg3)
-        if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3))
-        {
-            std::cout << "Error occured 1" << "\n";
-        }
-
-        // Print address of pUserInfo_3
-        std::cout << "pUserInfo_3: 0x" << std::hex << pUserInfo_3 << "\n";
-
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)pUserInfo_3, curr_pid, &pUsri3_name))
-        {
-            std::cout << "Error occured 2" << "\n";
-        }
-        // Print address of pointer to usri3_name
-        std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n";
-
-        if (temp_args[2] == 3)
-        {
-            std::cout << "Found: USER_INFO_3 struct!" << "\n";
-
-            // Replace Tester with Batman
-            // Batman = 42 00 61 00 74 00 6d 00 61 00 6e 00
-            uint8_t fake_user[12] = {66, 0, 97, 0, 116, 0, 109, 0, 97, 0, 110, 0};
-
-            for (uint8_t byte : fake_user)
-            {
-                if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pUsri3_name, curr_pid, &byte))
-                {
-                    std::cout << "Writing to mem failed!" << "\n";
-                    // add a break on failure
-                }
-                pUsri3_name++; // move address 1 byte
-            }
-
-            std::cout << "Replaced username with 'Batman' !" << "\n";
-
-        } else if (temp_args[2] == 2)
-        {
-            std::cout << "Found: USER_INFO_2 struct!" << "\n";
-        } else {
-            std::cout << "Unsupported USER_INFO_X struct!" << "\n";
-        }
-
-    }
-
-    // Pause the guest for 3 seconds
-    if (!strcmp(info->trap->name, "IcmpSendEcho2Ex"))
-    {
-        std::cout << "Hit IcmpSendEcho2Ex function!" << "\n";
-        std::cout << "Pausing guest..." << "\n";
-        drakvuf_pause(drakvuf);
-        sleep(3);
-        drakvuf_resume(drakvuf);
-        std::cout << "Resuming guest..." << "\n";
-    }
-
-    // Manipulate HTTPS file downloads by hooking the
-    // ncrypt.dll!SslDecryptPacket function. Only
-    // tested with powershell Invoke-WebRequestcmd
-    if (!strcmp(info->trap->name, "SslDecryptPacket"))
-    {
-        std::cout << "Hit SslDecryptPacket function!" << "\n";
-
-        // Initiate access to vmi
-        vmi_instance_t vmi = vmi_lock_guard(drakvuf);
-
-        // Get the data from the trap
-        ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-
-        // Store all the arguments passed by the function
-        std::vector<uint64_t> temp_args = data->arguments;
-
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-        // Address of 5th arg (A pointer to a buffer to contain the decrypted packet)
-        addr_t pbOutput = temp_args[4]; // OUT
-        std::cout << "pbOutput: 0x" << std::hex << pbOutput << "\n";
-
-        // Address of 6th arg (The length, bytes, of the pbOutput buffer)
-        addr_t cbOutput = (uint32_t)temp_args[5]; // IN GET LOWER PART OF 64 addr
-        std::cout << "Len of pOutput: " << cbOutput << "\n";
-
-        uint64_t decrypted_data_p = 0;
-        //uint64_t decrypted_data = 0;
-        //uint32_t decrypted_data_len = 0;
-
-        drakvuf_pause(drakvuf);
-
-        // Get address of decrypted_data
-        if (VMI_FAILURE == vmi_read_64_va(vmi, pbOutput, curr_pid, &decrypted_data_p))
-        {
-            std::cout << "Error reading pbOutput!" << "\n";
-        }
-
-        // Print actual decrypted_data content
-        std::cout << "decrypted_data: 0x"  << decrypted_data_p << "\n";
-
-        // only supports small TEXT files
-
-        // Replace 10 bytes in the buffer with "__________"
-        uint8_t poc_string[10] = {95,95,95,95,95,95,95,95,95,95};
-
-        // TODO
-        // Search for a double CRLF pattern which
-        // marks the end of the fields section of
-        // a message.
-        //uint8_t pattern[4] = { 13, 10, 13, 10 };
-
-        addr_t pBuffer_http_body = pbOutput + (cbOutput - 31);
-
-        // Modify decrypted HTTPS buffer
-         for (uint8_t byte : poc_string)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pBuffer_http_body, curr_pid, &byte))
-            {
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            pBuffer_http_body++; // move address 1 byte
-        }
-
-        drakvuf_resume(drakvuf);
-
-    }
-
-    ////////////////////////////////// END
-
+    
     uint64_t hookID = make_hook_id(info);
-    ret_hooks.erase(hookID);
+    drakvuf_pause(drakvuf);
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
 
+    /****** INSERTED CODE BEGINS **************/
+    //std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
+    /* CONFIG MANAGEMENT AND PERIODIC UPDATES */
+    std::time_t time_now = std::time(nullptr);
+    if(!(sys_info.logsesslist_addr > 0)) {
+        if (process_list.size() == 0) {
+            process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        }
+        sys_info.logsesslist_addr = find_logon_session_list(drakvuf, vmi, info, &sys_info);
+    } 
+    if (agent_config.last_update < time_now-60)           // Only update once a minute
+    {
+        get_config_from_redis(&agent_config);
+        agent_config.last_update = time_now;
+        std::vector<process> process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        std::vector<simple_user> user_list = list_users(drakvuf, vmi, info, &sys_info);
+    }
+    /* DECEPTION HOOKS AND FUNCTIONS **********/
+
+    if(!strcmp(info->trap->name, "NtCreateFile") && agent_config.ntcreatefile.enabled == true) {  
+        deception_nt_create_file(drakvuf, vmi, info, agent_config.ntcreatefile.target_string);
+
+    } else if((!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) && agent_config.ntcreatefile.enabled == true) {
+        deception_process_32_first_w(vmi, info, drakvuf);
+
+    } else if(!strcmp(info->trap->name, "GetIpNetTable") && agent_config.getipnettable.enabled == true) {
+        deception_get_ip_net_table(vmi, info, drakvuf);
+
+    } else if(!strcmp(info->trap->name, "NetUserGetInfo") && agent_config.process32firstw.enabled == true) {
+        deception_net_user_get_info(vmi, info);
+
+    } else if(!strcmp(info->trap->name, "LookupAccountSidW") && agent_config.netusergetinfo.enabled == true) {
+        deception_lookup_account_sid_w(vmi, info);
+
+    } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex") && agent_config.lookupaccountsid.enabled == true) {
+        deception_icmp_send_echo_2_ex(drakvuf, info);
+
+    } else if(!strcmp(info->trap->name, "SslDecryptPacket") && agent_config.icmpsendecho2ex.enabled == true) {
+        deception_ssl_decrypt_packet(vmi, info, drakvuf);
+        
+    } else if(!strcmp(info->trap->name, "FindFirstFileA") && agent_config.findfirstornextfile.enabled == true) {
+        uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
+        deception_find_first_or_next_file_a(vmi, info, fake_filename);
+
+    } else if(!strcmp(info->trap->name, "FindNextFileA") && agent_config.findfirstornextfile.enabled == true) {
+        uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
+        deception_find_first_or_next_file_a(vmi, info, fake_filename);
+
+    } else if(!strcmp(info->trap->name, "BCryptDecrypt")  && agent_config.bcryptdecrypt.enabled == true) {
+        deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
+
+    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot") && agent_config.createtoolhelp32snapshot.enabled == true) {
+        deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
+        
+    } else if(!strcmp(info->trap->name, "FilterFindFirst") && agent_config.filterfind.enabled == true) {
+        deception_filter_find(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
+        deception_filter_find(vmi, info, drakvuf);
+    
+    } else if(!strcmp(info->trap->name, "OpenProcessStub") && agent_config.openprocess.enabled == true) {
+        deception_openprocess(vmi, info, drakvuf, &agent_config, sys_info);
+
+    } else if(!strcmp(info->trap->name, "ReadProcessMemoryStub") && agent_config.readprocessmemory.enabled == true) {
+        deception_readprocessmemory(vmi, info, drakvuf, &agent_config, sys_info, &user_list, &new_user_list);
+
+    } else {
+        //log_message("DEBUG","event_hook",info->trap->name,"NONE","No handler or hook disabled.")
+    }
+    /****** INSERTED CODE ENDS *****************/
+
+    ret_hooks.erase(hookID);
+    drakvuf_resume(drakvuf);
+    //usermode_print(info, params->arguments, params->target);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -412,39 +302,6 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
     vmi_v2pcache_flush(vmi, info->regs->cr3);
 
     addr_t ret_addr = drakvuf_get_function_return_address(drakvuf, info);
-
- // Fake Privilege escalation by changing the SID
-    // of the LookupAccountSidW function. Only works
-    // with the whoami.exe /user command.
-    if (!strcmp(info->trap->name, "LookupAccountSidW"))
-    {
-        std::cout << "Hit LookupAccountSidW function!" << "\n";
-
-        // Get PID of process
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
-
-        // Get address of PSID
-        addr_t pSID = info->regs->rdx;
-        // Replace current user SID with system
-        uint8_t fake_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0};
-
-        // REAL System user SID
-        // 01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00
-
-        // Modify input argument 2
-        for (uint8_t byte : fake_SID)
-        {
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID, curr_pid, &byte))
-            {
-                std::cout << "Writing to mem failed!" << "\n";
-                // add a break on failure
-            }
-            pSID++; // move address 1 byte
-        }
-
-    }
-
-    ////////////// END /////////////
 
     if (!ret_addr)
     {
@@ -538,14 +395,7 @@ static void on_dll_discovered(drakvuf_t drakvuf, const std::string& dll_name, co
         auto vmi = vmi_lock_guard(drakvuf);
         vmi_dtb_to_pid(vmi, dll->dtb, &pid);
     }
-
-    fmt::print(plugin->m_output_format, "apimon", drakvuf, nullptr,
-        keyval("Event", fmt::Rstr("dll_discovered")),
-        keyval("DllName", fmt::Estr(dll_name)),
-        keyval("DllBase", fmt::Xval(dll->real_dll_base)),
-        keyval("PID", fmt::Nval(pid))
-    );
-
+    
     plugin->wanted_hooks.visit_hooks_for(dll_name, [&](const auto& e)
     {
         drakvuf_request_usermode_hook(drakvuf, dll, &e, usermode_hook_cb, plugin);
@@ -609,6 +459,42 @@ std::optional<std::string> apimon::resolve_module(drakvuf_t drakvuf, addr_t proc
     return {};
 }
 
+event_response_t apimon::ki_system_service_handler_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
+{
+    PRINT_DEBUG("[CODEMON] Entered system service handler\n");
+    proc_data_t proc_data = info->attached_proc_data;
+    if (!proc_data.tid)
+    {
+        PRINT_DEBUG("[CODEMON] Failed to get thread id in system service handler!\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    //bool our_fault = this->pf_in_progress.find(std::make_pair(proc_data.pid, proc_data.tid)) != this->pf_in_progress.end();
+    bool our_fault = true; // DIRTY HACK FOR NOW
+    if (!our_fault)
+    {
+        PRINT_DEBUG("[CODEMON] Not suppressing service exception - not our fault\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    // emulate `ret` instruction
+    addr_t saved_rip = drakvuf_get_function_return_address(drakvuf, info);
+    if (!saved_rip)
+    {
+        PRINT_DEBUG("[CODEMON] Error while reading the saved RIP in system service handler\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+    log_message("DEBUG","event_hook","bsod_handler","CHANGED","BSOD cancelled.");
+    page_mode_t pm = drakvuf_get_page_mode(drakvuf);
+    bool is32 = (pm != VMI_PM_IA32E);
+
+    constexpr int EXCEPTION_CONTINUE_EXECUTION = 0;
+    info->regs->rip = saved_rip;
+    info->regs->rsp += (is32 ? 4 : 8);
+    info->regs->rax = EXCEPTION_CONTINUE_EXECUTION;
+    return VMI_EVENT_RESPONSE_SET_REGISTERS;
+}
+
 apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output)
     : pluginex(drakvuf, output)
 {
@@ -617,7 +503,6 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         PRINT_DEBUG("[APIMON] Usermode hooking not supported.\n");
         return;
     }
-
     try
     {
         auto noLog = [](const auto& entry)
@@ -638,21 +523,58 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         // don't load this plugin if there is nothing to do
         return;
     }
-
+    
     usermode_cb_registration reg =
     {
         .pre_cb = on_dll_discovered,
         .post_cb = on_dll_hooked,
         .extra = (void*)this
     };
-    drakvuf_register_usermode_callback(drakvuf, &reg);
+
+    drakvuf_register_usermode_callback(drakvuf, &reg);  
 
     breakpoint_in_system_process_searcher bp;
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
+
+    // INSERT NEW STARTUP STUFF HERE
+    agent_config.last_update = 0;
+
+    simple_user xuser;
+
+    xuser.pstruct_addr = 0x20395271940;
+    xuser.user_name = "Batman";
+    xuser.domain = "LAPTOP-V13TN4M";
+    xuser.logon_server = "LAPTOP-V13TN4M2";
+    xuser.changed = true;
+
+    new_user_list.push_back(xuser);
+
+    this->kiSystemServiceHandlerHook = createSyscallHook("KiSystemServiceHandler", &apimon::ki_system_service_handler_cb);
+    if (!this->kiSystemServiceHandlerHook)
+        throw -1;
+
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_start\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        << ", ";
+        std::cout << "\"message\": "        << "\"Deceptions running and waiting for hooks.\"" ;
+    std::cout << "}" << "\n"; 
+    
+    // END NEW STARTUP STUFF
 }
 
 bool apimon::stop_impl()
 {
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_stop\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        ;
+    std::cout << "}" << "\n";
+     
     return drakvuf_stop_userhooks(drakvuf) && pluginex::stop_impl();
 }
 
