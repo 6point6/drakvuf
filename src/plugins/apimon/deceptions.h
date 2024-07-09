@@ -30,4 +30,6 @@ void deception_ssl_decrypt_packet(vmi_instance_t vmi, drakvuf_trap_info* info, d
 void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename);
 void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_trap_info* info);
 void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
+void deception_net_group_get_info(vmi_instance_t vmi, drakvuf_trap_info *info, std::wstring find);
+void deception_net_group_enum(vmi_instance_t vmi, drakvuf_trap_info *info, std::wstring find);
 #endif

@@ -245,6 +245,14 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_filter_find(vmi, info, drakvuf);
     } else if(!strcmp(info->trap->name, "FilterFindNext")) {
         deception_filter_find(vmi, info, drakvuf);
+    } else if(!strcmp(info->trap->name, "NetGroupGetInfo")) {
+        //deception_net_group_get_info(vmi, info);
+    } else if(!strcmp(info->trap->name, "NetGroupGetUsers")) {
+        std::wstring find = L"NEWADMIN";
+        deception_net_group_get_info(vmi, info, find);
+    } else if(!strcmp(info->trap->name, "NetGroupEnum")) {
+        std::wstring find = L"Domain Users";
+        deception_net_group_get_info(vmi, info, find);
     } else {
         std::cout << "No Handler: " << info->trap->name << "\n";
         usermode_print(info, params->arguments, params->target);
