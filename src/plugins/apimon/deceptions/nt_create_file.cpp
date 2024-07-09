@@ -17,8 +17,8 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
     if (has_any_flag(access_mask, (enum_mask_value_file)( //Query this first as we can do it without any other VMI lookups.
             (int)enum_mask_value_file::GENERIC_WRITE | 
             (int)enum_mask_value_file::GENERIC_ALL | 
-            (int)enum_mask_value_file::FILE_APPEND_DATA |
-            (int)enum_mask_value_file::FILE_WRITE_DATA |
+            (int)enum_mask_value_file::FILE_APPEND_DATA1 |
+            (int)enum_mask_value_file::FILE_WRITE_DATA1 |
             (int)enum_mask_value_file::DELETE | 
             (int)enum_mask_value_file::MAXIMUM_ALLOWED  ))) 
     {

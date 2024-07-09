@@ -106,7 +106,7 @@ void get_config_from_redis(deception_plugin_config* config)
     config->readprocessmemory.enabled =          (bool)std::stoi(redis.get("readprocessmemory_enabled").value_or("0"));
     config->getipnettable.enabled =              (bool)std::stoi(redis.get("getipnettable_enabled").value_or("0"));
 
-    std::cout << "Done." << "\n";
+    //std::cout << "Done." << "\n";
     
     } catch (const sw::redis::Error &e) 
     {

@@ -116,6 +116,7 @@
 #include "intelgathering.h" // Intel Gathering code
 #include "deceptions.h" // Deception code
 // #include <sw/redis++/redis++.h>
+#include "plugins/codemon/codemon.h"
 
 /* We create a handful of useful structs first thing so that we can use *
  * them later and persist across callbacks.                             */
@@ -214,11 +215,17 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     //std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
     /* CONFIG MANAGEMENT AND PERIODIC UPDATES */
     std::time_t time_now = std::time(nullptr);
+    if(!(sys_info.logsesslist_addr > 0)) {
+        if (process_list.size() == 0) {
+            process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        }
+        sys_info.logsesslist_addr = find_logon_session_list(drakvuf, vmi, info, &sys_info);
+    } 
     if (agent_config.last_update < time_now-60)           // Only update once a minute
     {
         get_config_from_redis(&agent_config);
         agent_config.last_update = time_now;
-        std::vector<process> active_process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        std::vector<process> process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
         std::vector<simple_user> user_list = list_users(drakvuf, vmi, info, &sys_info);
     }
     /* DECEPTION HOOKS AND FUNCTIONS **********/
@@ -270,15 +277,7 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         deception_readprocessmemory(vmi, info, drakvuf, &agent_config, sys_info, &user_list, &new_user_list);
 
     } else {
-        //std::cout << "No handler or hook disabled: " << info->trap->name << "\n";
-        std::cout << "{";
-            std::cout << "\"timestamp\": "      << std::dec << time_now             << ", "; 
-            std::cout << "\"type\": "           << "\"event_hook\""                 << ", ";
-            std::cout << "\"event\": "          << "\"" << info->trap->name << "\"" << ", ";
-            std::cout << "\"event_id\": "       << "\"" << info->event_uid  << "\"" << ", ";
-            std::cout << "\"action\": "         << "\"NONE\""                       << ", ";
-            std::cout << "\"message\": "        << "\"No handler or hook disabled\"";
-        std::cout << "}" << "\n"; 
+        //log_message("DEBUG","event_hook",info->trap->name,"NONE","No handler or hook disabled.")
     }
     /****** INSERTED CODE ENDS *****************/
 
@@ -460,6 +459,42 @@ std::optional<std::string> apimon::resolve_module(drakvuf_t drakvuf, addr_t proc
     return {};
 }
 
+event_response_t apimon::ki_system_service_handler_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
+{
+    PRINT_DEBUG("[CODEMON] Entered system service handler\n");
+    proc_data_t proc_data = info->attached_proc_data;
+    if (!proc_data.tid)
+    {
+        PRINT_DEBUG("[CODEMON] Failed to get thread id in system service handler!\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    //bool our_fault = this->pf_in_progress.find(std::make_pair(proc_data.pid, proc_data.tid)) != this->pf_in_progress.end();
+    bool our_fault = true; // DIRTY HACK FOR NOW
+    if (!our_fault)
+    {
+        PRINT_DEBUG("[CODEMON] Not suppressing service exception - not our fault\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    // emulate `ret` instruction
+    addr_t saved_rip = drakvuf_get_function_return_address(drakvuf, info);
+    if (!saved_rip)
+    {
+        PRINT_DEBUG("[CODEMON] Error while reading the saved RIP in system service handler\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+    log_message("DEBUG","event_hook","bsod_handler","CHANGED","BSOD cancelled.");
+    page_mode_t pm = drakvuf_get_page_mode(drakvuf);
+    bool is32 = (pm != VMI_PM_IA32E);
+
+    constexpr int EXCEPTION_CONTINUE_EXECUTION = 0;
+    info->regs->rip = saved_rip;
+    info->regs->rsp += (is32 ? 4 : 8);
+    info->regs->rax = EXCEPTION_CONTINUE_EXECUTION;
+    return VMI_EVENT_RESPONSE_SET_REGISTERS;
+}
+
 apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output)
     : pluginex(drakvuf, output)
 {
@@ -513,6 +548,10 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
     xuser.changed = true;
 
     new_user_list.push_back(xuser);
+
+    this->kiSystemServiceHandlerHook = createSyscallHook("KiSystemServiceHandler", &apimon::ki_system_service_handler_cb);
+    if (!this->kiSystemServiceHandlerHook)
+        throw -1;
 
     time_t time_now = std::time(nullptr);
     std::cout << "{";

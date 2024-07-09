@@ -12,8 +12,8 @@ enum class enum_mask_value_file
     FILE_EXECUTE = 1 << 2, // 4
     FILE_WRITE_EA = 1 << 3, // 8
     FILE_READ_EA = 1 << 4, // 16
-    FILE_APPEND_DATA = 1 << 5, // 32
-    FILE_WRITE_DATA = 1 << 6, // 64
+    FILE_APPEND_DATA1 = 1 << 5, // 32
+    FILE_WRITE_DATA1 = 1 << 6, // 64
     FILE_READ_DATA = 1 << 7,  // 128
     UNUSED_8 = 1 << 8,
     UNUSED_9 = 1 << 9,
@@ -73,6 +73,7 @@ struct deception_plugin_config {
     deception_config openprocess;
     deception_config readprocessmemory;
     deception_config getipnettable;
+    deception_config overwrite_lsl;
 };
 
 typedef struct deception_plugin_config* deception_plugin_config_t;
@@ -144,6 +145,7 @@ typedef struct _KIWI_MSV1_0_LIST_63 {
 
 typedef struct system_info {
     vmi_pid_t lsass_pid;
+    addr_t logsesslist_addr;
 } system_info;
 
 typedef struct simple_user {

@@ -22,6 +22,8 @@
 #include <iterator>
 #include <fstream>
 #include <cstdint>
+#include <chrono>
+#include <thread>
 
 extern "C" {
   #include "libdrakvuf/win.h"
@@ -141,7 +143,7 @@ std::vector<process> list_running_processes(drakvuf_t drakvuf, vmi_instance_t vm
             std::cout << "\"event\": "          << "\"process_found\""                          << ", ";
             std::cout << "\"event_id\": "       << "\""<< std::hex << info->event_uid << "\""   << ", ";
             std::cout << "\"process_name\": "   << "\""<< p.name << "\""                        << ", ";
-            std::cout << "\"pid\": "            << p.pid                                        << ", ";
+            std::cout << "\"pid\": "            << std::dec << p.pid                            << ", ";
             std::cout << "\"process_list_address\": "   << "\""<< std::hex << p.p_addr << "\""  << ", ";
             std::cout << "\"flink\": "   << "\""<< std::hex << p.flink << "\""                  << ", ";
             std::cout << "\"blink\": "   << "\""<< std::hex << p.blink << "\""                  ;
@@ -153,26 +155,27 @@ std::vector<process> list_running_processes(drakvuf_t drakvuf, vmi_instance_t vm
 }
 
 
-std::vector<simple_user> list_users(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, system_info* sysinfo) {
-    std::vector<simple_user> user_list;
+addr_t find_logon_session_list(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, system_info* sysinfo)
+{
     status_t status;
+    addr_t log_sess_list_addr = 0;
 
     addr_t lsass_eproc_addr = 0;
     bool success = win_find_eprocess(drakvuf, sysinfo->lsass_pid, "lsass.exe", &lsass_eproc_addr);
     if(!success){
-        log_message("ERROR", "data_collection", "list_users", "NONE", "Unable to find Lsass.exe _EPROCESS");
+        log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to find Lsass.exe _EPROCESS");
     }
 
     addr_t modulelist_addr = 0;
     success = win_get_module_list(drakvuf, lsass_eproc_addr, &modulelist_addr);
     if(!success){
-        log_message("ERROR", "data_collection", "list_users", "NONE", "Unable to find Lsass.exe Module List");
+        log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to find Lsass.exe Module List");
     }
 
     addr_t lsass_dtb = 0;
     status = vmi_pid_to_dtb(vmi, sysinfo->lsass_pid, &lsass_dtb);
     if(status == VMI_FAILURE){
-        log_message("ERROR", "data_collection", "list_users", "NONE", "Unable to find Lsass.exe Module List");
+        log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to find Lsass.exe Module List");
     }
 
     ACCESS_CONTEXT(ctx,
@@ -184,7 +187,7 @@ std::vector<simple_user> list_users(drakvuf_t drakvuf, vmi_instance_t vmi, drakv
     lsasrv_info = win_get_module_info_ctx(drakvuf, modulelist_addr, &ctx, "lsasrv.dll");
 
     if(!lsasrv_info){
-        log_message("ERROR", "data_collection", "list_users", "NONE", "Unable to get module info for lsasrv.dll");
+        log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to get module info for lsasrv.dll");
     }
 
     ctx.addr = lsasrv_info->base_addr;
@@ -195,142 +198,174 @@ std::vector<simple_user> list_users(drakvuf_t drakvuf, vmi_instance_t vmi, drakv
     addr_t increment = 0x1000;
 
     uint8_t buffer[increment];
-    size_t bytes_read; 
+    size_t bytes_read;
+    bool failure = false;
+    //uint64_t total_bytes_read = 0;
 
     chunk_position = lsasrv_info->base_addr;
-    log_message("DEBUG", "data_collection", "list_users", "NONE", "Starting to download lsasrv.dll...");
+    log_message("DEBUG", "data_collection", "find_logon_session_list", "NONE", "Starting to download lsasrv.dll.");
+    
     while (chunk_position < (lsasrv_info->base_addr+lsasrv_info->size)) {
         if(VMI_SUCCESS == vmi_read_va(vmi, chunk_position, sysinfo->lsass_pid, increment, &buffer, &bytes_read))
         {
             dll_buffer.insert(dll_buffer.end(), buffer, buffer + bytes_read);
             chunk_position += increment;
-        } else 
+            //total_bytes_read +=bytes_read;
+        } 
+        else 
         {
             std::ostringstream oss;
             oss << "Unable to read lsasrv.dll increment at " << std::hex << chunk_position << ". Injecting page fault and retrying.";
-            log_message("WARN", "data_collection", "list_users", "NONE", oss.str().c_str());
+            log_message("WARN", "data_collection", "find_logon_session_list", "NONE", oss.str().c_str());
             
-            success = vmi_request_page_fault(vmi, 0, chunk_position, 0);
-
-            if(VMI_SUCCESS == vmi_read_va(vmi, chunk_position, sysinfo->lsass_pid, increment, &buffer, &bytes_read))
-            {
-                dll_buffer.insert(dll_buffer.end(), buffer, buffer + bytes_read);
-                chunk_position += increment;
-            } else {
+            if(VMI_SUCCESS == vmi_request_page_fault(vmi, info->vcpu, chunk_position, 0)){
+                vmi_v2pcache_flush(vmi, lsass_dtb);
+                // if(status == VMI_FAILURE){
+                //     log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to flush v2p cache");
+                // }
                 std::ostringstream oss;
-                oss << "Still unable to read lsasrv.dll increment. Bytes Read: " << bytes_read;
-                log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
+                oss << "Injected page fault at " << std::hex << chunk_position;
+                log_message("DEBUG", "data_collection", "find_logon_session_list", "ACTION", oss.str().c_str());
+                failure = true;
                 chunk_position = lsasrv_info->base_addr+lsasrv_info->size+1;
-                break;
+
+                // if(VMI_SUCCESS == vmi_read_va(vmi, chunk_position, sysinfo->lsass_pid, increment, &buffer, &bytes_read))
+                // {
+                //     dll_buffer.insert(dll_buffer.end(), buffer, buffer + bytes_read);
+                //     chunk_position += increment;
+                //     total_bytes_read +=bytes_read;
+                // } else 
+                // {
+                //     std::ostringstream oss;
+                //     oss << "Still unable to read lsasrv.dll increment. Total bytes read: " << std::dec << total_bytes_read;
+                //     log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", oss.str().c_str());
+                //     chunk_position = lsasrv_info->base_addr+lsasrv_info->size+1;
+                //     failure = true;
+                //     break;
+                // }
             }
+        chunk_position = lsasrv_info->base_addr+lsasrv_info->size+1;
         }
     }
 
-    uint8_t signature[] = {0x33, 0xff, 0x41, 0x89, 0x37, 0x4c, 0x8b, 0xf3, 0x45, 0x85, 0xc0, 0x74}; //Mimikatz sig for Win10 19045
+    if (!failure) {
+        uint8_t signature[] = {0x33, 0xff, 0x41, 0x89, 0x37, 0x4c, 0x8b, 0xf3, 0x45, 0x85, 0xc0, 0x74}; //Mimikatz sig for Win10 19045
 
-    auto it = std::search(dll_buffer.begin(), dll_buffer.end(), signature, signature + sizeof(signature));
+        auto it = std::search(dll_buffer.begin(), dll_buffer.end(), signature, signature + sizeof(signature));
 
-    if (it == dll_buffer.end())
-    {
-        log_message("ERROR", "data_collection", "list_users", "NONE", "Unable to find signature.");
+        if (it == dll_buffer.end())
+        {
+            log_message("ERROR", "data_collection", "find_logon_session_list", "NONE", "Unable to find signature.");
+        }
+        else
+        {
+            size_t n = std::distance(dll_buffer.begin(), it);
+            
+            std::vector<uint8_t> rip_offset_vec(4);
+            std::copy(dll_buffer.begin() + n + 23, dll_buffer.begin() + n + 23 + 4, rip_offset_vec.begin());
+
+            uint64_t rip_offset = convertToUnsignedLong(rip_offset_vec);
+
+            log_sess_list_addr = lsasrv_info->base_addr + n + 23 + 4 + rip_offset;
+        }
     }
-    else
-    {
-        size_t n = std::distance(dll_buffer.begin(), it);
-        
-        std::vector<uint8_t> rip_offset_vec(4);
-        std::copy(dll_buffer.begin() + n + 23, dll_buffer.begin() + n + 23 + 4, rip_offset_vec.begin());
+    return log_sess_list_addr;
+}   
 
-        uint64_t rip_offset = convertToUnsignedLong(rip_offset_vec);
 
-        addr_t log_sess_list_addr = 0;
-        log_sess_list_addr = lsasrv_info->base_addr + n + 23 + 4 + rip_offset;
+std::vector<simple_user> list_users(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, system_info* sysinfo) {
+    std::vector<simple_user> user_list;
+    
+    addr_t list_head = 0, cur_list_entry = 0, next_list_entry = 0;
+    addr_t log_sess_list_addr = sysinfo->logsesslist_addr;
 
-        addr_t list_head = 0, cur_list_entry = 0, next_list_entry = 0;
+    if (VMI_FAILURE == vmi_read_addr_va(vmi, log_sess_list_addr, sysinfo->lsass_pid, &cur_list_entry)) {
+        std::ostringstream oss;
+        oss << "Failed to read first pointer at 0x" << std::hex << log_sess_list_addr;
+        log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
 
         if (VMI_FAILURE == vmi_read_addr_va(vmi, log_sess_list_addr, sysinfo->lsass_pid, &cur_list_entry)) {
             std::ostringstream oss;
-            oss << "Failed to read first pointer at 0x" << std::hex << log_sess_list_addr;
+            oss << "Failed to read first pointer after page fault: 0x " << std::hex << log_sess_list_addr;
             log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
+            return user_list;
+        }    
+    }
 
-            if (VMI_FAILURE == vmi_read_addr_va(vmi, log_sess_list_addr, sysinfo->lsass_pid, &cur_list_entry)) {
+    list_head = log_sess_list_addr;
+
+    bool keep_reading = true;
+
+    status_t status;
+
+    while (keep_reading) {        
+        try {
+            if(VMI_FAILURE == vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &next_list_entry)) 
+            {
                 std::ostringstream oss;
-                oss << "Failed to read first pointer after page fault: 0x " << std::hex << log_sess_list_addr;
-                log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
-                return user_list;
-            }    
+                oss << "Unable to read user entry. Injecting page fault at 0x" << std::hex << cur_list_entry;
+                log_message("WARN", "data_collection", "list_users", "NONE", oss.str().c_str());
+                status = vmi_request_page_fault(vmi, 0, cur_list_entry, 0);
+                if(VMI_FAILURE == vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &next_list_entry)) {
+                    
+                    throw(cur_list_entry);
+                }
+            }
+
+            unicode_string_t* username_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0x90, sysinfo->lsass_pid);
+            std::string username = convert_ustr_to_string(username_ustr);
+            vmi_free_unicode_str(username_ustr);
+
+            unicode_string_t* domain_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xa0, sysinfo->lsass_pid);
+            std::string domain = convert_ustr_to_string(domain_ustr);
+            vmi_free_unicode_str(domain_ustr);
+
+            unicode_string_t* type_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xc0, sysinfo->lsass_pid);
+            std::string type = convert_ustr_to_string(type_ustr);
+            vmi_free_unicode_str(type_ustr);
+
+            unicode_string_t* logonsvr_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xf0, sysinfo->lsass_pid);
+            std::string logonsvr = convert_ustr_to_string(logonsvr_ustr);
+            vmi_free_unicode_str(logonsvr_ustr);
+
+            simple_user user;
+
+            status = vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &user.flink);
+            status = vmi_read_addr_va(vmi, cur_list_entry+0x8, sysinfo->lsass_pid, &user.blink);
+
+            status = vmi_read_64_va(vmi, cur_list_entry+0xd8, sysinfo->lsass_pid, &user.logon_type);
+            status = vmi_read_64_va(vmi, cur_list_entry+0xe8, sysinfo->lsass_pid, &user.session);
+            status = vmi_read_16_va(vmi, cur_list_entry+0x92, sysinfo->lsass_pid, &user.max_user_len);
+            status = vmi_read_16_va(vmi, cur_list_entry+0xa2, sysinfo->lsass_pid, &user.max_domain_len);
+            status = vmi_read_16_va(vmi, cur_list_entry+0xf2, sysinfo->lsass_pid, &user.max_logsvr_len);
+
+            if(status != VMI_SUCCESS){
+                log_message("ERROR","data_collection","list_user","READ","Failed to read element from struct");
+            }
+
+            user.pstruct_addr = cur_list_entry;
+            user.user_name = username;
+            user.domain = domain;
+            user.logon_server = logonsvr;
+            user.pcredential_blob = cur_list_entry + 0xd0;
+            user.type = type;
+
+            user_list.push_back(user);
+
+            }
+        catch (addr_t address) {
+            std::ostringstream oss;
+            oss << "Unable to read 0x" << std::hex << address;
+            log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
+            keep_reading = false;
+            break;
+            }
+
+        if(list_head == next_list_entry) {
+            keep_reading = false;
+        } else {
+            cur_list_entry = next_list_entry;
         }
-
-        list_head = log_sess_list_addr;
-
-        bool keep_reading = true;
-
-        while (keep_reading) {        
-            try {
-                if(VMI_FAILURE == vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &next_list_entry)) 
-                {
-                    std::ostringstream oss;
-                    oss << "Unable to read user entry. Injecting page fault at 0x" << std::hex << cur_list_entry;
-                    log_message("WARN", "data_collection", "list_users", "NONE", oss.str().c_str());
-                    success = vmi_request_page_fault(vmi, 0, cur_list_entry, 0);
-                    if(VMI_FAILURE == vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &next_list_entry)) {
-                        
-                        throw(cur_list_entry);
-                    }
-                }
-
-                unicode_string_t* username_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0x90, sysinfo->lsass_pid);
-                std::string username = convert_ustr_to_string(username_ustr);
-                vmi_free_unicode_str(username_ustr);
-
-                unicode_string_t* domain_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xa0, sysinfo->lsass_pid);
-                std::string domain = convert_ustr_to_string(domain_ustr);
-                vmi_free_unicode_str(domain_ustr);
-
-                unicode_string_t* type_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xc0, sysinfo->lsass_pid);
-                std::string type = convert_ustr_to_string(type_ustr);
-                vmi_free_unicode_str(type_ustr);
-
-                unicode_string_t* logonsvr_ustr = vmi_read_unicode_str_va(vmi, cur_list_entry+0xf0, sysinfo->lsass_pid);
-                std::string logonsvr = convert_ustr_to_string(logonsvr_ustr);
-                vmi_free_unicode_str(logonsvr_ustr);
-
-                simple_user user;
-
-                success = vmi_read_addr_va(vmi, cur_list_entry, sysinfo->lsass_pid, &user.flink);
-                success = vmi_read_addr_va(vmi, cur_list_entry+0x8, sysinfo->lsass_pid, &user.blink);
-
-                success = vmi_read_64_va(vmi, cur_list_entry+0xd8, sysinfo->lsass_pid, &user.logon_type);
-                success = vmi_read_64_va(vmi, cur_list_entry+0xe8, sysinfo->lsass_pid, &user.session);
-                success = vmi_read_16_va(vmi, cur_list_entry+0x92, sysinfo->lsass_pid, &user.max_user_len);
-                success = vmi_read_16_va(vmi, cur_list_entry+0xa2, sysinfo->lsass_pid, &user.max_domain_len);
-                success = vmi_read_16_va(vmi, cur_list_entry+0xf2, sysinfo->lsass_pid, &user.max_logsvr_len);
-
-                user.pstruct_addr = cur_list_entry;
-                user.user_name = username;
-                user.domain = domain;
-                user.logon_server = logonsvr;
-                user.pcredential_blob = cur_list_entry + 0xd0;
-                user.type = type;
-
-                user_list.push_back(user);
-
-                }
-            catch (addr_t address) {
-                std::ostringstream oss;
-                oss << "Unable to read 0x" << std::hex << address;
-                log_message("ERROR", "data_collection", "list_users", "NONE", oss.str().c_str());
-                keep_reading = false;
-                break;
-                }
-
-            if(list_head == next_list_entry) {
-                keep_reading = false;
-            } else {
-                cur_list_entry = next_list_entry;
-            }
-
-            }
 
     }
 
@@ -362,3 +397,4 @@ std::vector<simple_user> list_users(drakvuf_t drakvuf, vmi_instance_t vmi, drakv
 
     return user_list;
 }
+
