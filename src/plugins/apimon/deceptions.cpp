@@ -3,7 +3,7 @@
  * intention of making this a little easier to read and maintain - if we can *
  * leave apimon alone then that's one fewer thing to break! There's also the *
  * advantage that we may not only be reliant on apimon going forward so this *
- * should make any future refactor easier too.                               *
+ * should make any future refactor easier too.                               * 
  *****************************************************************************/
 
 #include <iostream>
@@ -16,18 +16,18 @@
 #include <codecvt>
 #include <locale>
 #include "plugins/output_format.h"
-#include "apimon.h"
+#include "apimon.h" 
 #include <bitset>
 #include <assert.h>
 #include "deception_utils.h"
 
 #define MAX_PATH 260
 
-/// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file.
+/// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file. 
 /// This currently is achieved by overwriting the RSP register, resulting a crash of the calling process.
 /// @param drakvuf
-/// @param vmi
-/// @param info
+/// @param vmi  
+/// @param info 
 void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info *info, std::string file_to_protect)
 {
 
@@ -37,15 +37,15 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
     uint32_t access_mask = temp_args[1];
 
     if (has_any_flag(access_mask, (enum_mask_value_file)( // Query this first as we can do it without any other VMI lookups.
-                                      (int)enum_mask_value_file::GENERIC_WRITE |
-                                      (int)enum_mask_value_file::GENERIC_ALL |
-                                      (int)enum_mask_value_file::FILE_APPEND_DATA |
-                                      (int)enum_mask_value_file::FILE_WRITE_DATA |
-                                      (int)enum_mask_value_file::DELETE |
+            (int)enum_mask_value_file::GENERIC_WRITE | 
+            (int)enum_mask_value_file::GENERIC_ALL | 
+            (int)enum_mask_value_file::FILE_APPEND_DATA |
+            (int)enum_mask_value_file::FILE_WRITE_DATA |
+            (int)enum_mask_value_file::DELETE | 
                                       (int)enum_mask_value_file::MAXIMUM_ALLOWED)))
     {
-        addr_t p_obj_attributes_struct = temp_args[2];
-        vmi_pid_t curr_pid = info->attached_proc_data.pid;
+        addr_t p_obj_attributes_struct = temp_args[2]; 
+        vmi_pid_t curr_pid = info->attached_proc_data.pid; 
         const char *process_name = info->attached_proc_data.name;
 
         std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
@@ -53,16 +53,16 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         uint64_t obj_name_ustr_ptr = 0; // Receiving variable for the response from the memory read below.
 
         if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
-        {
-            std::cout << "ERROR     | Unable to read from Object Attributes." << "\n";
-        }
-
+            {
+                std::cout << "ERROR     | Unable to read from Object Attributes." << "\n";
+            }
+        
         unicode_string_t *target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
-        std::string target_filename = convert_ustr_to_string(target_filename_ustr);
-
+        std::string target_filename = convert_ustr_to_string(target_filename_ustr); 
+ 
         std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect); // Migrate from this line to before the equality check out of the loop for performance.
         std::vector<uint8_t> file_to_protect_array = {};
-
+        
         for (char ch : file_to_protect)
         { // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
             file_to_protect_array.push_back(ch);
@@ -79,8 +79,8 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
             if (VMI_FAILURE == vmi_set_vcpureg(vmi, 0x0, RSP, info->vcpu))
             {
                 std::cout << "ERROR     | Unable to overwrite vCPU register. \n";
-            }
-            else
+            } 
+            else 
             {
                 std::cout << "ACTION    | File Handle request disrupted - RSP overwritten." << "\n";
             }
@@ -165,12 +165,12 @@ void deception_icmp_send_echo_2_ex(drakvuf_t drakvuf, drakvuf_trap_info *info)
 
 void deception_ssl_decrypt_packet(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_t drakvuf)
 {
-    std::cout << "Hit SslDecryptPacket function!" << "\n";
+std::cout << "Hit SslDecryptPacket function!" << "\n";    
     ApimonReturnHookData *data = (ApimonReturnHookData *)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments;                     // Store all the arguments passed by the function
     uint64_t decrypted_data_p = 0;
     vmi_pid_t curr_pid = info->attached_proc_data.pid; // Get PID of process
-
+    
     addr_t pbOutput = temp_args[4]; // Address of 5th arg (A pointer to a buffer to contain the decrypted packet)
     std::cout << "pbOutput: 0x" << std::hex << pbOutput << "\n";
 
@@ -183,7 +183,7 @@ void deception_ssl_decrypt_packet(vmi_instance_t vmi, drakvuf_trap_info *info, d
         std::cout << "Error reading pbOutput!" << "\n";
     }
     std::cout << "decrypted_data: 0x" << decrypted_data_p << "\n"; // Print actual decrypted_data content
-
+    
     uint8_t poc_string[10] = {95, 95, 95, 95, 95, 95, 95, 95, 95, 95}; // Replace 10 bytes in the buffer with "__________", only supports small TEXT files
     // TODO
     // Search for a double CRLF pattern which
@@ -326,66 +326,98 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
 
     // added to prevent memory leaks
     delete[] aFilterBuff;
+ }
+
+ struct MyEntryStruct 
+ {
+    wchar_t* name;
+ };
+
+std::wstring read_wide_string(vmi_instance_t vmi, addr_t name, vmi_pid_t curr_pid) 
+{
+    std::vector<uint16_t> buffer(256); 
+    size_t bytes_read = 0;
+
+    if (VMI_FAILURE == vmi_read_va(vmi, name, curr_pid, buffer.size() * sizeof(uint16_t), reinterpret_cast<uint8_t*>(buffer.data()), &bytes_read)) {
+        std::cout << "Failed to read memory from VMI\n";
+        return std::wstring(); 
+    }
+
+    buffer.resize(bytes_read / sizeof(uint16_t));
+
+    std::wstring wide_string;
+    for (auto c : buffer) {
+        wide_string += static_cast<wchar_t>(c);
+    }
+
+    return wide_string;
 }
 
-// void deception_net_group_enum(vmi_instance_t vmi, drakvuf_trap_info *info)
-// {
-//     ApimonReturnHookData *data = (ApimonReturnHookData *)info->trap->data;
-//     std::vector<uint64_t> temp_args = data->arguments;
-//     vmi_pid_t curr_pid = info->attached_proc_data.pid;
+void deception_net_group_get_info(vmi_instance_t vmi, drakvuf_trap_info *info, std::wstring find)
+{
+    ApimonReturnHookData *data = (ApimonReturnHookData *)info->trap->data;
+    std::vector<uint64_t> temp_args = data->arguments;
+    vmi_pid_t curr_pid = info->attached_proc_data.pid;
 
-//     addr_t addrValue = static_cast<addr_t>(sizeof(MyEntryStruct));
-//     addr_t current_va = temp_args[2];
-//     addr_t entiresread_addr = temp_args[4];
+    addr_t current_va;
+    addr_t entiresread_addr;
 
-//     uint32_t entriesread;
-//     // uint32_t x = 14;
-//     if (VMI_FAILURE == vmi_read_32_va(vmi, entiresread_addr, curr_pid, &entriesread))
-//     {
-//         std::cout << "Failed to read memory from VMI\n";
-//         return;
-//     }
-//     std::cout << "Entires: " << entriesread << "\n";
-//     // vmi_write_32_va(vmi, entiresread_addr, curr_pid, &x);
+    addr_t addrValue = static_cast<addr_t>(sizeof(MyEntryStruct));
+    if (!strcmp(info->trap->name, "NetGroupGetUsers")) {
+        current_va = temp_args[3];
+        entiresread_addr = temp_args[5];
+    } else {
+        current_va = temp_args[2];
+        entiresread_addr = temp_args[4];
+    }
+  
+    uint32_t entriesread;
+    if (VMI_FAILURE == vmi_read_32_va(vmi, entiresread_addr, curr_pid, &entriesread))
+    {
+        std::cout << "Failed to read memory from VMI\n";
+        return;
+    }
+    std::cout << "Entires: " << entriesread << "\n";
 
-//     addr_t name_addr;
-//     addr_t name;
-//     if (VMI_FAILURE == vmi_read_addr_va(vmi, current_va, curr_pid, &name_addr))
-//     {
-//         std::cout << "Error occured 1" << "\n";
-//         return;
-//     }
-//     std::cout << "current_va: " << current_va << "\n";
+    addr_t name_addr;
+    addr_t name;
+    if (VMI_FAILURE == vmi_read_addr_va(vmi, current_va, curr_pid, &name_addr))
+    {
+        std::cout << "Error occured 1" << "\n";
+        return;
+    }
+    std::cout << "current_va: " << current_va << "\n";
 
-//     std::wstring groupname = L"";
-//     for (uint32_t i = 0; i < entriesread; i++)
-//     {
-//         if (VMI_FAILURE == vmi_read_addr_va(vmi, name_addr, curr_pid, &name))
-//         {
-//             std::cout << "Error occured 2" << "\n";
-//             return;
-//         }
+    std::wstring groupname = L"";
+    for (uint32_t i = 0; i < entriesread; i++)
+    {
+        if (VMI_FAILURE == vmi_read_addr_va(vmi, name_addr, curr_pid, &name))
+        {
+            std::cout << "Error occured 2" << "\n";
+            return;
+        }
+        std::cout << "name_addr: " << name_addr << "\n";
+        groupname = read_wide_string(vmi, name, curr_pid);
+        uint8_t fake_user[] = {67, 0, 104, 0, 101, 0, 101, 0, 115, 0, 101, 0, 0};
+        size_t pos = groupname.find(find);
+        std::wcout << L"group: " << groupname << std::endl;
+        std::wcout << L"find: " << find << std::endl;
 
-//         groupname = read_wide_string(vmi, name, curr_pid);
+        if (pos != std::wstring::npos)
+        {
+            std::wcout << L"Substring found at position: " << pos << std::endl;
+            for (uint8_t byte : fake_user)
+            {
+                if (VMI_FAILURE == vmi_write_8_va(vmi, name, curr_pid, &byte))
+                {
+                    std::cout << "Writing to mem failed!" << "\n";
+                    break;
+                }
+                name++; // move address 1 byte
+            }
+        }
+        
+        name_addr += addrValue;
+    }
 
-//         name_addr += addrValue;
-//     }
-
-//     std::wcout << L":" << groupname << std::endl;
-//     uint8_t fake_user[] = {67, 0, 104, 0, 101, 0, 101, 0, 115, 0, 101, 0, 0};
-//     std::wstring find = L"Key Admins";
-//     size_t pos = groupname.find(find);
-//     if (pos != std::wstring::npos)
-//     {
-//         std::wcout << L"Substring found at position: " << pos << std::endl;
-//         for (uint8_t byte : fake_user)
-//         {
-//             if (VMI_FAILURE == vmi_write_8_va(vmi, name_addr, curr_pid, &byte))
-//             {
-//                 std::cout << "Writing to mem failed!" << "\n";
-//                 break;
-//             }
-//             name++;
-//         }
-//     }
-// }
+}
