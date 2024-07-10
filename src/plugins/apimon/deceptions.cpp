@@ -20,19 +20,21 @@
 #include "deception_utils.h"
 #include <algorithm>
 #include "deceptions.h"
-#include <unistd.h>
 
 #define MAX_PATH 260
+
 /// @brief Hooks ntdll.dll!NtCreateFile and evaluates the target file object, blocking access if it is a specified file.
 /// This currently is achieved by overwriting the RSP register, resulting a crash of the calling process.
 /// @param drakvuf
 /// @param vmi
 /// @param info
 void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_trap_info* info, std::string file_to_protect) {
+
     drakvuf_pause(drakvuf);         // Move this into apimon so it's consistent?
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
     uint32_t access_mask = temp_args[1];
+
     if (has_any_flag(access_mask, (enum_mask_value_file)( //Query this first as we can do it without any other VMI lookups.
             (int)enum_mask_value_file::GENERIC_WRITE |
             (int)enum_mask_value_file::GENERIC_ALL |
@@ -44,27 +46,35 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
         addr_t p_obj_attributes_struct = temp_args[2];
         vmi_pid_t curr_pid = info->attached_proc_data.pid;
         const char* process_name = info->attached_proc_data.name;
+
         std::cout << "INFO      | NtCreateFile with WRITE/DELETE called by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
+
         addr_t obj_name_ptr = p_obj_attributes_struct +0x10;
         uint64_t obj_name_ustr_ptr = 0;         //Receiving variable for the response from the memory read below.
+
         if (VMI_FAILURE == vmi_read_64_va(vmi, obj_name_ptr, curr_pid, &obj_name_ustr_ptr))
             {
                 std::cout << "ERROR     | Unable to read from Object Attributes." << "\n";
             }
+
         unicode_string_t* target_filename_ustr = vmi_read_unicode_str_va(vmi, (addr_t)obj_name_ustr_ptr, curr_pid);
         std::string target_filename = convert_ustr_to_string(target_filename_ustr);
+
         //std::u16string u16_file_to_protect = convert_string_to_u16string(file_to_protect);    // Migrate from this line to before the equality check out of the loop for performance.
         std::vector<uint8_t> file_to_protect_array = {};
+
         for(char ch : file_to_protect){        // This loop and subsequent step converts our normal string to UCS2 in line with how Windows presents the filename in memory.
             file_to_protect_array.push_back(ch);
             file_to_protect_array.push_back(0);
         }
         std::string w_file_to_protect(file_to_protect_array.begin(), file_to_protect_array.end());
+
         // Catch and neutralise attempts to write to the target file (or MBR if we set this to \\??\\.\\PhysicalDrive0)
         if (target_filename == w_file_to_protect) // FUTURE: Replace this with config lookup
         {
             std::cout << "INFO      | Access to " << target_filename << " identified by " << process_name << " (PID: " << std::dec << curr_pid << ")" << "\n";
             //std::cout << "Requested Access Mask is: " << std::bitset<32>(temp_args[1]) <<"\n";
+
             if (VMI_FAILURE == vmi_set_vcpureg(vmi, 0x0, RSP, info->vcpu))
             {
                 std::cout << "ERROR     | Unable to overwrite vCPU register. \n";
@@ -74,9 +84,12 @@ void deception_nt_create_file(drakvuf_t drakvuf, vmi_instance_t vmi, drakvuf_tra
                 std::cout << "ACTION    | File Handle request disrupted - RSP overwritten." << "\n";
             }
         }
+
     }
     drakvuf_resume(drakvuf);
+
 }
+
 void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
@@ -85,15 +98,18 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     addr_t bufptr = temp_args[3]; // Store address of bufptr
     uint64_t pUserInfo_3 = 0; // Store address of User_Info_3 struct
     uint64_t pUsri3_name = 0; // Store address of Usri3_name struct
+
     if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_3)) // Read address at pointer (arg3)
     {
         std::cout << "Error occured 1" << "\n";
     }
+
     std::cout << "pUserInfo_3: 0x" << std::hex << pUserInfo_3 << "\n";
     if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)pUserInfo_3, curr_pid, &pUsri3_name)) // Print address of pUserInfo_3
     {
         std::cout << "Error occured 2" << "\n";
     }
+
     std::cout << "pUsri3_name: 0x" << std::hex << pUsri3_name << "\n"; // Print address of pointer to usri3_name
     if (temp_args[2] == 3)
     {
@@ -110,7 +126,9 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
             }
             pUsri3_name++; // move address 1 byte
         }
+
         std::cout << "Replaced username with 'Batman' !" << "\n";
+
     } else if (temp_args[2] == 2) {
         std::cout << "Found: USER_INFO_2 struct!" << "\n";
     } else {
@@ -118,316 +136,21 @@ void deception_net_user_get_info(vmi_instance_t vmi, drakvuf_trap_info* info) {
     }
 }
 
-/*###################### NetUserEnum ################################*/
-
-void deception_net_user_enum(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf, std::string targetUser){
-    // 0 - Init - Get the data from the trap
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-    std::vector<uint64_t> temp_args = data->arguments;// Get args from func
-    vmi_pid_t curr_pid = data->target->pid; // Get PID of process
-
-    uint32_t net_api_status = info->regs->rax;
-
-    // ### 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
-    addr_t pUserInfo_0 = 0; //  To store pointer to struct array containing pointers to usernames
-    addr_t bufptr = temp_args[3];
-    std::cout << "DEBUG >>>>>>>>>> *bufptr: 0x" << std::hex << bufptr << "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pUserInfo_0)){
-        std::cout << "Error occured 1 - Reading bufptr" << "\n";
-        return;
-    }
-    std::cout << "DEBUG >>>>>>>>>> pUserInfo_0: 0x" << std::hex << pUserInfo_0 << std::endl;
-
-    // ### 2 - Get addr in EntriesRead, read value at this addr, store in EntriesNum
-    uint64_t EntriesNum = 0;
-    addr_t pEntriesRead = temp_args[5];
-    std::cout << "DEBUG >>>>>>>>>> EntriesRead Pointer: 0x" << std::hex << pEntriesRead << "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, pEntriesRead, curr_pid, &EntriesNum)){
-        std::cout << "Error occured 2 - Reading EntriesRead" << "\n";
-        return;
-    }
-    std::cout << "Number of Username Entries Read: " << std::dec << EntriesNum << "\n";
-    /*
-    uint64_t NewEntriesNum = EntriesNum - 1;
-    std::cout << "DEBUG >>>>>>>>>> New entries Number: " << NewEntriesNum << std::endl;
-    //addr_t pEntriesRead = temp_args[5];
-    if (VMI_FAILURE != vmi_write_addr_va(vmi, pEntriesRead, curr_pid, &NewEntriesNum)){
-        std::cout << "DEBUG >>>>>>>>>> Entries Read Changed " << std::endl;
-    }
-    else {
-        std::cout << "Error 7.1 - Writing to EntriesRead" << std::endl;
-        return;
-    }
-    */
-
-    // ### 3 - Iterate through usernames gathered, storing in array, then reading;
-        std::vector<uint64_t> pUsri0_name_array;
-    for(uint64_t i = 0; i < EntriesNum; i++)
-    {
-        // ### 4 - Get addr in pUserInfo_0, read + store in vector; move 8 bytes; read next
-        uint64_t pUsri0_name = 0;
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pUserInfo_0 + i * 8), curr_pid, &pUsri0_name))
-        {
-            std::cout << "Error occured 4 - Reading pUserInfo_0" << "\n";
-            return;
-        }
-        pUsri0_name_array.push_back(pUsri0_name);
-    }
-    // ### 5 - Read the values at pUsri0_name_array, 64 bytes at a time
-    uint8_t usrname_hex[64] = {0};
-    std::vector<std::vector<uint64_t>> usrname_hex_mtrx;
-    for(size_t i = 0; i < pUsri0_name_array.size(); i++){
-        uint64_t addr = pUsri0_name_array[i];
-        if (VMI_FAILURE == vmi_read_va(vmi, addr, curr_pid, 64, usrname_hex, NULL)){
-            std::cout << "Error 5 occured - Reading values from memory" << std::endl;
-            return;
-        }
-        // ### 6 - Iterate bytes, push into vector, end if double null (end str); push vectors to matrix
-        std::vector<uint64_t> usrname_hex_vtr;
-        for(int j = 0; j < 63; j++){
-            if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0){
-                break;
-            }
-            usrname_hex_vtr.push_back(usrname_hex[j]);
-        }
-        usrname_hex_mtrx.push_back(usrname_hex_vtr);
-    }
-    /*std::cout << "\nUsername value: --------¬\n";
-    for(const auto& subvtr : usrname_hex_mtrx){
-        for(uint64_t hexval : subvtr){
-            std::cout << hexval << " ";
-        }
-        std::cout << std::endl;
-    }*/
-
-    // ### 7 - Set target user (hardcoded below); if username matches, replace with null bytes
-    std::vector<uint64_t> target_hex_vtr = {0x48, 0x0, 0x49, 0x0, 0x47, 0x0, 0x48, 0x0, 0x50, 0x0, 0x52, 0x0, 0x49, 0x0, 0x56};
-    size_t i = 0;
-    std::cout << "DEBUG >>>>>>>>>> Attempting username match..." << std::endl;
-    for(const auto& subvtr : usrname_hex_mtrx){
-        if (subvtr == target_hex_vtr) {
-            std::cout << "\n-----------------\n!!! USERNAME MATCH !!!\n-----------------" << std::endl;
-            //
-            addr_t jmp_addr = (addr_t)pUserInfo_0 + ((i+1) * 8);
-            addr_t ptr_loc = (pUserInfo_0 + i * 8);
-            //if (VMI_FAILURE != vmi_write_va(vmi, pUsri0_name_array[i], curr_pid, 2, dbl_Null, NULL))
-            if (VMI_FAILURE != vmi_write_addr_va(vmi, ptr_loc, curr_pid, &jmp_addr)){
-                std::cout << "\n-----------------\nTarget user account hidden!\n---------------\n";
-            }
-            else {
-                std::cout << "Error 7.1 - Skipping matched user addr" << std::endl;
-                return;
-            }
-            //
-            std::string api_status_str = std::to_string(net_api_status);
-            std::cout << "DEBUG >>>>>>>>>> net_api_status : " << std::hex << api_status_str << std::endl;
-            //
-            /*
-            addr_t final_entr = (pUserInfo_0 + (EntriesNum * 8));
-            //uint8_t dbl_Null[] = {0, 0};
-            if (VMI_FAILURE != vmi_write_addr_va(vmi, final_entr, curr_pid, &end_addr)){
-                std::cout << "DEBUG >>>>>>>>>> Overwritten final entr with end func addr" << std::endl;
-            }
-            else {
-                std::cout << "Error 7.2 - Writing null to memory failed" << std::endl;
-                return;
-            }
-            */
-        }
-    ++i;
-    }
-}
-
-/*###################### NetQueryDisplayInformation ################################*/
-
-/*
-NET_API_STATUS NET_API_FUNCTION NetQueryDisplayInformation(
-  [in]  LPCWSTR ServerName,
-  [in]  DWORD   Level,
-  [in]  DWORD   Index,
-  [in]  DWORD   EntriesRequested,
-  [in]  DWORD   PreferredMaximumLength,
-  [out] LPDWORD ReturnedEntryCount,
-  [out] PVOID   *SortedBuffer
-);
-
-typedef struct _NET_DISPLAY_USER {
-  LPWSTR usri1_name;
-  LPWSTR usri1_comment;
-  DWORD  usri1_flags;
-  LPWSTR usri1_full_name;
-  DWORD  usri1_user_id;
-  DWORD  usri1_next_index;
-} NET_DISPLAY_USER, *PNET_DISPLAY_USER;
-*/
-
-void deception_net_query_display_info(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf){
-    // 0 - Init - Get the data from the trap
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-    std::vector<uint64_t> temp_args = data->arguments;
-    vmi_pid_t curr_pid = data->target->pid;
-
-    /* ## Below not needed as can use arg directly? ###
-    // ### 1 - Get addr in bufptr, read value at this addr, store in pUserInfo0
-    addr_t pSortBuffr_0 = 0;
-    //addr_t sortBuffr_arg = temp_args[6];
-    std::cout << "    *bufptr: 0x" << std::hex << temp_args[6]<< "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, temp_args[6], curr_pid, &pSortBuffr_0)){
-        std::cout << "Error occured 1 - Reading bufptr" << "\n";
-        return;
-    }
-    std::cout << "pUserInfo_0: 0x" << std::hex << pUserInfo_0 << "\n";
-    */
-
-    // ### 2 - Get addr in ReturnedEntryCount, read value at this addr, store in EntriesNum
-    uint64_t EntriesNum = 0;
-    //addr_t pEntriesRead = temp_args[5];
-    std::cout << "    EntriesRead Pointer: 0x" << std::hex << temp_args[5] << "\n";
-    if (VMI_FAILURE == vmi_read_64_va(vmi, temp_args[5], curr_pid, &EntriesNum)){
-        std::cout << "Error occured 2 - Reading EntriesReturned" << "\n";
-        return;
-    }
-    std::cout << "Number of User Entries Read: " << std::dec << EntriesNum << "\n";
-
-   // ### Copied below from above concept - WIP ##
-   // ### 3 - Iterate through usernames gathered, storing in array, then reading;
-        std::vector<uint64_t> usri1_name_vtr;
-    for(uint64_t i = 0; i < EntriesNum; i++)
-    {
-        // ### 4 - Get addr in pUserInfo_0, read + store in vector; move 8 bytes; read next
-        uint64_t pUsri1_name = 0;
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(temp_args[6] + i * 36), curr_pid, &pUsri1_name)) // Struct is of size 36 bytes <-- LPWSTR(8)*3 + DWORD(4)*3 = 36
-        {
-            std::cout << "Error occured 4 - pUsri1_name" << "\n";
-            return;
-        }
-        usri1_name_vtr.push_back(pUsri1_name);
-    }
-    // ### 5 - Read the values at pUsri0_name_array, 64 bytes at a time
-    uint8_t usrname_hex[64] = {0};
-    std::vector<std::vector<uint64_t>> usr1_name_hex_mtrx;
-    for(size_t i = 0; i < usri1_name_vtr.size(); i++){
-        uint64_t addr = usri1_name_vtr[i];
-        if (VMI_FAILURE == vmi_read_va(vmi, addr, curr_pid, 64, usrname_hex, NULL)){
-            std::cout << "Error 5 occured - Reading values from memory" << std::endl;
-            return;
-        }
-        // ### 6 - Iterate bytes, push into vector, end if double null (end str); push vectors to matrix
-        std::cout << std::hex << usrname_hex << std::endl;
-        std::vector<uint64_t> usrname_hex_vtr;
-        for(int j = 0; j < 63; j++){
-            if (usrname_hex[j] == 0 && usrname_hex[j+1] == 0){
-                break;
-            }
-            usrname_hex_vtr.push_back(usrname_hex[j]);
-        }
-        usr1_name_hex_mtrx.push_back(usrname_hex_vtr);
-    }
-    std::cout << "\nUsername values: --------¬\n";
-    for(const auto& subvtr : usr1_name_hex_mtrx){
-        for(uint64_t hexval : subvtr){
-            std::cout << hexval << " ";
-        }
-        std::cout << std::endl;
-    }
-}
-
-/*###################### NetLocalGroupGetMembers ################################*/
-/*void deception_net_lgrp_getmem(vmi_instance_t vmi, drakvuf_trap_info* info)
-{
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
-    std::vector<uint64_t> temp_args = data->arguments;
-    addr_t bufptr = temp_args[3];
-    std::cout << "    *bufptr: 0x" << std::hex << temp_args[3] << "\n";
-    vmi_pid_t curr_pid = data->target->pid;
-
-    uint64_t pLocalGroupMembersInfo_3 = 0;
-    uint64_t pLgrmi3_domainandname = 0;
-
-    if (VMI_FAILURE == vmi_read_64_va(vmi, bufptr, curr_pid, &pLocalGroupMembersInfo_3)) {
-        std::cout << "Error occured 1" << "\n";
-    }
-    std::cout << "pLocalGroupMembersInfo_3: 0x" << std::hex << pLocalGroupMembersInfo_3 << "\n";
-
-    uint64_t entriesread = temp_args[4]; // Get the number of entries read
-
-    for(uint64_t i = 0; i < entriesread; i++) { // Loop over each entry
-        if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(pLocalGroupMembersInfo_3 + i * sizeof(uint64_t)), curr_pid, &pLgrmi3_domainandname)) {
-            std::cout << "Error occured 2" << "\n";
-        }
-
-        char* domainandname = vmi_read_str_va(vmi, pLgrmi3_domainandname, curr_pid); // Read the domain and name as a str
-        if(domainandname) {
-            std::string domainandnameStr(domainandname); // Convert domain + name to str
-            size_t pos = domainandnameStr.find('\\'); // Find the pos of \ in str
-            if(pos != std::string::npos) {
-                std::string accountName = domainandnameStr.substr(pos + 1); // Get account name part of the str
-                if(accountName == "HIGHPRIV") {
-                    uint8_t nullChar[] = {0, 0}; // Create null chara
-                    std::cout << "HIGHPRIV account nulled!" << "\n";
-                    if (VMI_FAILURE == vmi_write_va(vmi, pLgrmi3_domainandname + pos + 1, curr_pid, sizeof(nullChar), nullChar, NULL)) { // Write the null character
-                        std::cout << "Writing to memory failed!" << "\n";
-                    }
-                } else {
-                    std::cout << "Domain and Name: " << domainandname << "\n";
-                }
-            }
-            free(domainandname);
-        } else {
-            std::cout << "Error reading domain and name" << "\n";
-        }
-    }
-}
-*/
-
-/*###################### LookupAccountSIDW ################################*/
-/*void deception_lookup_account_sidw(vmi_instance_t vmi, drakvuf_trap_info* info) {
-
-    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
-    std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
-    vmi_pid_t curr_pid = data->target->pid; // Get PID of process
-
+void deception_lookup_account_sid_w(vmi_instance_t vmi, drakvuf_trap_info* info) {
+    vmi_pid_t curr_pid = info->attached_proc_data.pid; // Get PID of process
     addr_t pSID = info->regs->rdx; // Get address of PSID
-    std::cout << "    PSID: 0x" << std::hex << pSID << "\n"; // Print the address of the PSID
+    uint8_t fake_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0}; // Replace current user SID with system
+    /*  REAL System user SID
+        01 01 00 00 00 00 00 05 18 00 00 00 00 00 00 00 */
 
-    uint8_t subAuthorityCount; // Check subAuths to get SID size
-    if (VMI_FAILURE == vmi_read_8_va(vmi, (addr_t)pSID + 1, curr_pid, &subAuthorityCount)) {
-        std::cout << "Reading SubAuthorityCount failed!" << "\n";
-        return;
-    }
-
-    size_t sidLength = 8 + 4 * subAuthorityCount;
-
-    uint8_t system_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0, 0, 0, 0, 0}; // System user SID
-    uint8_t guest_SID[16] = {1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0, 0, 0, 0, 0}; // Guest user SID
-
-    // Read the current SID
-    uint8_t current_SID[sidLength];
-    if (VMI_FAILURE == vmi_read_va(vmi, pSID, curr_pid, sidLength, current_SID, NULL)) {
-        std::cout << "Reading current SID failed!" << "\n";
-        return;
-    }
-
-    // If the current SID is not the system SID, zero out the old SID
-    if (memcmp(current_SID, system_SID, 16) != 0) {
-        for (size_t i = 0; i < sidLength; i++) {
-            uint8_t zero = 0;
-            if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID + i, curr_pid, &zero)) {
-                std::cout << "Zeroing out old SID failed!" << "\n";
-                return;
-            }
-        }
-    }
-
-    // If the current SID is the system SID, overwrite the SID with guest SID
-    // Otherwise, overwrite the SID with system SID
-    uint8_t* new_SID = (memcmp(current_SID, system_SID, 16) == 0) ? guest_SID : system_SID;
-
-    for (int i = 0; i < 16; i++) {
-        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID + i, curr_pid, &new_SID[i])) {
+    for (uint8_t byte: fake_SID) // Modify input argument 2
+    {
+        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)pSID, curr_pid, &byte))
+        {
             std::cout << "Writing to mem failed!" << "\n";
             break;
         }
+        pSID++; // move address 1 byte
     }
 }
 */
@@ -448,16 +171,20 @@ std::cout << "Hit SslDecryptPacket function!" << "\n";
     std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
     uint64_t decrypted_data_p = 0;
     vmi_pid_t curr_pid = info->attached_proc_data.pid; // Get PID of process
+
     addr_t pbOutput = temp_args[4]; // Address of 5th arg (A pointer to a buffer to contain the decrypted packet)
     std::cout << "pbOutput: 0x" << std::hex << pbOutput << "\n";
+
     addr_t cbOutput = (uint32_t)temp_args[5]; // IN GET LOWER PART OF 64 addrm, Address of 6th arg (The length, bytes, of the pbOutput buffer)
     std::cout << "Len of pOutput: " << cbOutput << "\n";
+
     drakvuf_pause(drakvuf);
     if (VMI_FAILURE == vmi_read_64_va(vmi, pbOutput, curr_pid, &decrypted_data_p)) // Get address of decrypted_data
     {
         std::cout << "Error reading pbOutput!" << "\n";
     }
     std::cout << "decrypted_data: 0x"  << decrypted_data_p << "\n"; // Print actual decrypted_data content
+
     uint8_t poc_string[10] = {95,95,95,95,95,95,95,95,95,95}; // Replace 10 bytes in the buffer with "__________", only supports small TEXT files
     // TODO
     // Search for a double CRLF pattern which
@@ -477,33 +204,74 @@ std::cout << "Hit SslDecryptPacket function!" << "\n";
     drakvuf_resume(drakvuf);
 }
 
+void deception_find_first_or_next_file_a(vmi_instance_t vmi, drakvuf_trap_info* info, uint8_t* fake_filename) {
+    ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
+    std::vector<uint64_t> temp_args = data->arguments; // Store all the arguments passed by the function
+    vmi_pid_t curr_pid = info->attached_proc_data.pid;  // Get PID of process
+    uint64_t Win32_Find_Data = 0; // Declare address store for Win32_Find_Data struct
+    uint64_t cFileName = 0; // Declare address store for cFileName
+
+    addr_t lpFindFileData = temp_args[1]; // Address of the 2nd arg
+    std::cout << "lpFindFileData: 0x" << std::hex << temp_args[1] << "\n";
+
+    if (VMI_FAILURE == vmi_read_64_va(vmi, lpFindFileData, curr_pid, &Win32_Find_Data)) // Read address at pointer (arg2)
+    {
+        std::cout << "Failed to read memory from VMI\n";
+        return;
+    }
+    std::cout << "WIN32_FIND_DATAA: 0x" << std::hex << Win32_Find_Data << "\n"; // Print address of Win32_Find_Data
+
+    if (VMI_FAILURE == vmi_read_64_va(vmi, (addr_t)(Win32_Find_Data + 44), curr_pid, &cFileName)) // Read address at the offset for the 9th arg in Win32_Find_Data (44 = DWORD*5 + FILETIME*3)
+    {
+        std::cout << "Error occured 1" << "\n";
+    }
+    std::cout << "cFileName: 0x" << std::hex << cFileName << "\n"; // Print address of cFileName
+
+    // Need to loop through the array to make work
+    for (uint64_t i = 0; i < sizeof(*fake_filename); i++)
+    {
+        if (VMI_FAILURE == vmi_write_8_va(vmi, (addr_t)cFileName, curr_pid, (fake_filename + i))) {
+            std::cout << "Writing to mem failed!" << "\n";
+            break;
+        }
+        cFileName++; // move address 1 byte
+    }
+}
+
 void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info* info, deception_plugin_config* config) {
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data;
     std::vector<uint64_t> temp_args = data->arguments;
     vmi_pid_t curr_pid = data->target->pid;
+
     if(temp_args[2] == 0x1B0) {                         // Mimikatz extractions are based on a fixed length. 0x1B0 for MSV, 0x40 for DPAPI.
         std::cout << "Mimikatz Identified (MSV1_0)!" << "\n";
+
         addr_t ntlm_address = temp_args[1]+0x4a;
         addr_t user_address = temp_args[1]+0x1a0;
         addr_t dom_address  = temp_args[1]+0x180;
         addr_t sha1_address = temp_args[1]+0x6a;
+
         uint16_t extracted_ntlm[8];
         if(VMI_FAILURE == vmi_read_va(vmi, ntlm_address, curr_pid, 16, &extracted_ntlm, nullptr)){
             std::cout << "Unable to read NTLM hash." << "\n";
         }
+
         //========================================================================
         // Below is just for printing and can be commented out when not debugging
         std::ostringstream convert;
         for (ulong i = 0; i < sizeof(extracted_ntlm)/2; i++) {
             convert << std::hex << (int)swap_uint16(extracted_ntlm[i]);
         }
+
         std::string extracted_ntlm_string = convert.str();
         std::cout << "Decrypted NTLM: " << extracted_ntlm_string << "\n";
         // std::cout << std::hex << extracted_ntlm << "\n";
+
         //========================================================================
         // Overwrite the NTLM hash. Some thought needs to go into this to understand what we want to write and to maintain some record of
         // what we've said before so that we have consistency. Maybe a sensible answer is to lookup the User ID from Redis and pull the
         // intended response from there?
+
         std::vector<uint8_t> new_ntlm_hash = {0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef};
         for (uint8_t byte: new_ntlm_hash)
         {
@@ -514,21 +282,27 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
             }
             ntlm_address++; // move address 1 byte
         }
+
         //========================================================================
         // Repeat the above process but for usernames.
+
         uint16_t extracted_user[21]; // SAM account names have a 20 char limit so this handles the length plus a null-terminator.
         if(VMI_FAILURE == vmi_read_va(vmi, user_address,curr_pid,20,&extracted_user, nullptr)){
             std::cout << "Unable to read User." << "\n";
         }
+
         std::ostringstream convert_user;
         for (ulong i = 0; i < sizeof(extracted_user)/2; i++) {
             if(extracted_user[i] != 0) {
                 convert_user << (char)extracted_user[i];
             }
         }
+
         std::string extracted_user_string = convert_user.str();
         std::cout << "Decrypted User: "<< extracted_user_string << "\n";
+
         std::vector<uint8_t> new_username = {0x43, 0x00, 0x70, 0x00, 0x74, 0x00, 0x2E, 0x00, 0x20, 0x00, 0x57, 0x00, 0x57, 0x00, 0x00, 0x00};
+
         for (uint8_t byte: new_username)
         {
             if (VMI_FAILURE == vmi_write_8_va(vmi, user_address, curr_pid, &byte))
@@ -544,19 +318,25 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
         if(VMI_FAILURE == vmi_read_va(vmi, dom_address,curr_pid,40,&extracted_domain, nullptr)){
             std::cout << "Unable to read User." << "\n";
         }
+
         std::ostringstream convert_domain;
         for (ulong i = 0; i < sizeof(extracted_domain)/2; i++) {
             if(extracted_domain[i] != 0) {
                 convert_domain << (char)extracted_domain[i];
             }
         }
+
         std::string extracted_domain_string = convert_domain.str();
         std::cout << "Decrypted Domain: "<< extracted_domain_string << "\n";
+
         unicode_string_t* domain_ustr = vmi_read_unicode_str_va(vmi, temp_args[1]+0xb0, curr_pid);
         std::string domain = convert_ustr_to_string(domain_ustr);
         std::cout << "Ustr: " << domain << "\n";
+
+
         std::vector<uint8_t> new_domain = {0x44, 0x00, 0x45, 0x00, 0x53, 0x00, 0x4b, 0x00, 0x54, 0x00, 0x4f, 0x00, 0x50, 0x00, 0x2d, 0x00,
                                             0x56, 0x00, 0x31, 0x00, 0x33, 0x00, 0x54, 0x00, 0x4e, 0x00, 0x34, 0x00, 0x4d, 0x00};
+
         for (uint8_t byte: new_domain)
         {
             if (VMI_FAILURE == vmi_write_8_va(vmi, dom_address, curr_pid, &byte))
@@ -572,19 +352,23 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
         if(VMI_FAILURE == vmi_read_va(vmi, sha1_address, curr_pid, 20, &extracted_sha1, nullptr)){
             std::cout << "Unable to read NTLM hash." << "\n";
         }
+
         //========================================================================
         // Below is just for printing and can be commented out when not debugging
         std::ostringstream convert_sha1;
         for (ulong i = 0; i < sizeof(extracted_sha1)/2; i++) {
             convert_sha1 << std::hex << (int)swap_uint16(extracted_sha1[i]);
         }
+
         std::string extracted_sha1_string = convert_sha1.str();
         std::cout << "Decrypted SHA1: " << extracted_sha1_string << "\n";
         // std::cout << std::hex << extracted_ntlm << "\n";
+
         //========================================================================
         // Overwrite the NTLM hash. Some thought needs to go into this to understand what we want to write and to maintain some record of
         // what we've said before so that we have consistency. Maybe a sensible answer is to lookup the User ID from Redis and pull the
         // intended response from there?
+
         std::vector<uint8_t> new_sha1_hash = {0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef,
                                                 0x00, 0x00, 0x00, 0x00};
         for (uint8_t byte: new_sha1_hash)
@@ -596,6 +380,7 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
             }
             sha1_address++; // move address 1 byte
         }
+
     } else if(temp_args[2] == 0x40)
     {
         std::cout << "Mimikatz Identified (DPAPI)!" << "\n";
@@ -604,12 +389,15 @@ void deception_bcrypt_decrypt(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_tra
         if(VMI_FAILURE == vmi_read_va(vmi, dpapi_address, curr_pid, 32, &extracted_dpapi, nullptr)){
             std::cout << "Unable to read NTLM hash." << "\n";
         }
+
         std::ostringstream convert_dpapi;
         for (ulong i = 0; i < sizeof(extracted_dpapi)/2; i++) {
             convert_dpapi << std::hex << (int)swap_uint16(extracted_dpapi[i]);
         }
+
         std::string extracted_dpapi_string = convert_dpapi.str();
         std::cout << "Decrypted DPAPI Key: " << extracted_dpapi_string << "\n";
+
         // std::vector<uint8_t> new_dpapi = {0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef,0xde, 0xad, 0xbe, 0xef};
         // for (uint8_t byte: new_dpapi)
         // {
@@ -632,6 +420,7 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         std::cout << "RAX is 0, reached end of Linked List.\n";
         return;
     }
+
     struct PROCESSENTRY32W {
         uint32_t dwSize; // 4 bytes
         uint32_t cntUsage; // 4 bytes
@@ -644,8 +433,10 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         uint32_t dwFlags; // 4 bytes
         uint16_t szExeFile[MAX_PATH]; // 2 bytes * 260
     } pe32;
+
     ApimonReturnHookData* data = (ApimonReturnHookData*)info->trap->data; // Get the data from the trap
     std::vector<uint64_t> args = data->arguments;
+
     if(vmi_read_va(vmi, args[1], info->proc_data.pid, sizeof(pe32), &pe32, NULL) == VMI_FAILURE) {
         std::cout << "Failed to read PROCESSENTRY32W.\n";
     } else {
@@ -658,6 +449,7 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
         std::cout << "th32ParentProcessID: " << std::dec << pe32.th32ParentProcessID << "\n";
         std::cout << "pcPriClassBase: " << std::dec << pe32.pcPriClassBase << "\n";
         std::cout << "dwFlags: " << std::dec << pe32.dwFlags << "\n";
+
         std::ostringstream convert_exefile;
         for (ulong i = 0; i < sizeof(pe32.szExeFile); i++) {
             if(isprint((int)pe32.szExeFile[i]) > 0) {
@@ -666,8 +458,10 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
                 break;
             }
         }
+
         std::string convert_exefile_str = convert_exefile.str();
         std::cout << "szExeFile: "<< convert_exefile_str << "\n";
+
         if(
             strcmp(convert_exefile_str.c_str(), "conhost.exe") != 0 &&
             strcmp(convert_exefile_str.c_str(), "ProcessList.exe") != 0
@@ -675,6 +469,7 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
             std::cout << "-----------\n";
             return;
         }
+
         PROCESSENTRY32W pe32mod = {
             .dwSize = pe32.dwSize,
             .cntUsage = pe32.cntUsage,
@@ -687,6 +482,7 @@ void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, d
             .dwFlags = pe32.dwFlags,
             .szExeFile = {0x46, 0x61, 0x6b, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x2e, 0x65, 0x78, 0x65}
         };
+
         if(vmi_write_va(vmi, args[1], info->proc_data.pid, sizeof(pe32mod), &pe32mod, NULL) == VMI_FAILURE) {
             std::cout << "Failed to write PROCESSENTRY32W.\n";
         } else {
@@ -704,6 +500,7 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
     addr_t xBuffLocation;
     size_t xBuffSize;
     const size_t REPLACEMENT_SIZE = 28;
+
     if (!strcmp(info->trap->name, "FilterFindFirst"))
     {
         xBuffLocation = temp_args[1];
@@ -714,7 +511,9 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
         xBuffLocation = temp_args[2];
         xBuffSize = temp_args[3];
     }
+
     unsigned char *aFilterBuff = new unsigned char[xBuffSize];
+
     // reading and storing buffer
     if (VMI_FAILURE == vmi_read_va(vmi, xBuffLocation, curr_pid, xBuffSize, aFilterBuff, NULL))
     {
@@ -722,11 +521,15 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
                   << &aFilterBuff << "\n";
         return;
     }
+
     unsigned char *aReplacement = new unsigned char[REPLACEMENT_SIZE]{77, 0, 121, 0, 66, 0, 97, 0, 99, 0, 107, 0, 117, 0, 112, 0, 50, 0, 56, 0, 51, 0, 48, 0, 53, 0, 48, 0};
+
     // adding null terminator
     aReplacement[REPLACEMENT_SIZE] = '\0';
+
     // converting buffer to string
     // std::string sFindNext(aFilterBuff, aFilterBuff + xBuffSize);
+
     // looping through buffer and looking for WdFilter
     // std::cout << "filter: ";
     for (size_t i = 0; i < xBuffSize; i++)
@@ -737,6 +540,7 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
             {
                 aFilterBuff[i + j] = aReplacement[j];
             }
+
             // writing altered buffer
             if (VMI_FAILURE == vmi_write_va(vmi, xBuffLocation, curr_pid, xBuffSize, aFilterBuff, NULL))
             {
@@ -748,6 +552,7 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
         // std::cout << aFilterBuff[i];
     }
     // std::cout << "\n";
+
     // outputing the buffer details to the console as string
     // if (!(sFindNext.empty()))
     // {
@@ -756,6 +561,7 @@ void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info *info, drakvuf_
     //     std::cout << "memory address: " << std::hex << &aFilterBuff << "\n";
     //     std::cout << "Size: " << xBuffSize << "\n";
     // }
+
     // added to prevent memory leaks
     delete[] aFilterBuff;
 }

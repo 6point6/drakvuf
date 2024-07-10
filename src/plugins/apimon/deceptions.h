@@ -10,16 +10,12 @@
 #define DECEPTIONS_H
 
 #include <vector>
-#include <map>
-#include <memory>
-#include <unordered_map>
-#include <optional>
-#include <glib.h>
-#include <libusermode/userhook.hpp>
-#include "plugins/plugins_ex.h"
 #include "apimon.h"
 #include <libvmi/libvmi.h>
+#include "deception_types.h"
+#include "intelgathering.h"
 
+<<<<<<< HEAD
 struct  deception_config {
         bool enabled;                                   // Is the function turned on?
         bool active;                                    // Has the function been called and has a leftover effect?
@@ -49,4 +45,41 @@ void deception_create_tool_help_32_snapshot(vmi_instance_t vmi, drakvuf_trap_inf
 void deception_process_32_first_w(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 void deception_filter_find(vmi_instance_t vmi, drakvuf_trap_info* info, drakvuf_t drakvuf);
 
+=======
+#include "deceptions/bcrypt_decrypt.h"
+#include "deceptions/create_tool_help_32_snapshot.h"
+#include "deceptions/filter_find.h"
+#include "deceptions/find_first_or_next_file_a.h"
+#include "deceptions/get_ip_net_table.h"
+#include "deceptions/icmp_send_echo_2_ex.h"
+#include "deceptions/lookup_account_sid_w.h"
+#include "deceptions/net_user_get_info.h"
+#include "deceptions/nt_create_file.h"
+#include "deceptions/process_32_first_w.h"
+#include "deceptions/ssl_decrypt_packet.h"
+
+
+void deception_openprocess(
+    vmi_instance_t vmi, 
+    drakvuf_trap_info *info, 
+    drakvuf_t drakvuf, 
+    deception_plugin_config* config, 
+    system_info sysinfo
+);
+void deception_readprocessmemory(
+    vmi_instance_t vmi, 
+    drakvuf_trap_info *info, 
+    drakvuf_t drakvuf, 
+    deception_plugin_config* config, 
+    system_info sysinfo,
+    std::vector<simple_user>* user_list, 
+    std::vector<simple_user>* new_user_list
+);
+void deception_overwrite_logonsessionlist(
+    vmi_instance_t vmi, 
+    system_info sysinfo, 
+    std::vector<simple_user>* user_list,
+    std::vector<simple_user>* new_user_list
+);
+>>>>>>> origin/main
 #endif

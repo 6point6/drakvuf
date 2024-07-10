@@ -110,21 +110,23 @@
 #include "plugins/output_format.h"
 #include "apimon.h"
 #include "crypto.h"
+
+#include "deception_types.h"
+#include "deception_utils.h" // Deception code
+#include "intelgathering.h" // Intel Gathering code
 #include "deceptions.h" // Deception code
-#include <sw/redis++/redis++.h>
+// #include <sw/redis++/redis++.h>
+#include "plugins/codemon/codemon.h"
 
-// namespace
-// {
-
-// struct ApimonReturnHookData : PluginResult
-// {
-//     std::vector<uint64_t> arguments;
-//     hook_target_entry_t* target = nullptr;
-// };
-
-// };
-
+/* We create a handful of useful structs first thing so that we can use *
+ * them later and persist across callbacks.                             */
 deception_plugin_config agent_config;
+std::vector<process> process_list;
+std::vector<simple_user> user_list;
+std::vector<simple_user> new_user_list;
+system_info sys_info;
+
+/* END ADDITIONS                                                        */
 
 static uint64_t make_hook_id(const drakvuf_trap_info_t* info)
 {
@@ -207,6 +209,7 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
 
     uint64_t hookID = make_hook_id(info);
     drakvuf_pause(drakvuf);
+<<<<<<< HEAD
 
     /*
     // Start: Custom Deception Code
@@ -231,9 +234,41 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
         std::string file_to_protect = "\\??\\C:\\Test\\Target File.txt";
         deception_nt_create_file(drakvuf, vmi, info, file_to_protect);
     } else if(!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) {
+=======
+    vmi_instance_t vmi = vmi_lock_guard(drakvuf);
+
+    /****** INSERTED CODE BEGINS **************/
+    //std::cout << "Hit: " << info->trap->name << "\n"; // Remove once completed debugging. Probably huge perf impact. 
+    /* CONFIG MANAGEMENT AND PERIODIC UPDATES */
+    std::time_t time_now = std::time(nullptr);
+    if(!(sys_info.logsesslist_addr > 0)) {
+        if (process_list.size() == 0) {
+            process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        }
+        sys_info.logsesslist_addr = find_logon_session_list(drakvuf, vmi, info, &sys_info);
+    } 
+    if (agent_config.last_update < time_now-60)           // Only update once a minute
+    {
+        get_config_from_redis(&agent_config);
+        agent_config.last_update = time_now;
+        std::vector<process> process_list = list_running_processes(drakvuf, vmi, info, &sys_info, &agent_config);
+        std::vector<simple_user> user_list = list_users(drakvuf, vmi, info, &sys_info);
+    }
+    /* DECEPTION HOOKS AND FUNCTIONS **********/
+
+    if(!strcmp(info->trap->name, "NtCreateFile") && agent_config.ntcreatefile.enabled == true) {  
+        deception_nt_create_file(drakvuf, vmi, info, agent_config.ntcreatefile.target_string);
+
+    } else if((!strcmp(info->trap->name, "Process32FirstW") || !strcmp(info->trap->name, "Process32NextW")) && agent_config.ntcreatefile.enabled == true) {
+>>>>>>> origin/main
         deception_process_32_first_w(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "NetUserGetInfo")) {
+
+    } else if(!strcmp(info->trap->name, "GetIpNetTable") && agent_config.getipnettable.enabled == true) {
+        deception_get_ip_net_table(vmi, info, drakvuf);
+
+    } else if(!strcmp(info->trap->name, "NetUserGetInfo") && agent_config.process32firstw.enabled == true) {
         deception_net_user_get_info(vmi, info);
+<<<<<<< HEAD
     } else if(!strcmp(info->trap->name, "NetUserEnum")) {
         std::string targetUser = "HIGHPRIV"; // To do: Change from hardcoded to obtain from Redis
         deception_net_user_enum(vmi, info, drakvuf, targetUser);
@@ -244,31 +279,61 @@ event_response_t apimon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     //} else if(!strcmp(info->trap->name, "LookupAccountSidW")) {
     //    deception_lookup_account_sidw(vmi, info);
     } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex")) {
+=======
+
+    } else if(!strcmp(info->trap->name, "LookupAccountSidW") && agent_config.netusergetinfo.enabled == true) {
+        deception_lookup_account_sid_w(vmi, info);
+
+    } else if(!strcmp(info->trap->name, "IcmpSendEcho2Ex") && agent_config.lookupaccountsid.enabled == true) {
+>>>>>>> origin/main
         deception_icmp_send_echo_2_ex(drakvuf, info);
-    } else if(!strcmp(info->trap->name, "SslDecryptPacket")) {
+
+    } else if(!strcmp(info->trap->name, "SslDecryptPacket") && agent_config.icmpsendecho2ex.enabled == true) {
         deception_ssl_decrypt_packet(vmi, info, drakvuf);
+<<<<<<< HEAD
     /*
     } else if(!strcmp(info->trap->name, "FindFirstFileA")) {
+=======
+        
+    } else if(!strcmp(info->trap->name, "FindFirstFileA") && agent_config.findfirstornextfile.enabled == true) {
+>>>>>>> origin/main
         uint8_t fake_filename[] = {84, 101, 115, 116, 95, 70, 105, 108, 101, 50, 46, 116, 120, 116, 0}; // Replace My_secrets.zip with Test_File2.txt
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
-    } else if(!strcmp(info->trap->name, "FindNextFileA")) {
+
+    } else if(!strcmp(info->trap->name, "FindNextFileA") && agent_config.findfirstornextfile.enabled == true) {
         uint8_t fake_filename[] = {66, 111, 114, 105, 110, 103, 95, 70, 111, 108, 100, 101, 114}; // Replace Secret_Folder with Boring_Folder
         deception_find_first_or_next_file_a(vmi, info, fake_filename);
+<<<<<<< HEAD
     */
     } else if(!strcmp(info->trap->name, "BCryptDecrypt")) {
+=======
+
+    } else if(!strcmp(info->trap->name, "BCryptDecrypt")  && agent_config.bcryptdecrypt.enabled == true) {
+>>>>>>> origin/main
         deception_bcrypt_decrypt(vmi, drakvuf, info, &agent_config);
-    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot")) {
+
+    } else if(!strcmp(info->trap->name, "CreateToolhelp32Snapshot") && agent_config.createtoolhelp32snapshot.enabled == true) {
         deception_create_tool_help_32_snapshot(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "FilterFindFirst")) {
+        
+    } else if(!strcmp(info->trap->name, "FilterFindFirst") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
-    } else if(!strcmp(info->trap->name, "FilterFindNext")) {
+    } else if(!strcmp(info->trap->name, "FilterFindNext") && agent_config.filterfind.enabled == true) {
         deception_filter_find(vmi, info, drakvuf);
+    
+    } else if(!strcmp(info->trap->name, "OpenProcessStub") && agent_config.openprocess.enabled == true) {
+        deception_openprocess(vmi, info, drakvuf, &agent_config, sys_info);
+
+    } else if(!strcmp(info->trap->name, "ReadProcessMemoryStub") && agent_config.readprocessmemory.enabled == true) {
+        deception_readprocessmemory(vmi, info, drakvuf, &agent_config, sys_info, &user_list, &new_user_list);
+
     } else {
-        std::cout << "No Handler: " << info->trap->name << "\n";
-        usermode_print(info, params->arguments, params->target);
+        //log_message("DEBUG","event_hook",info->trap->name,"NONE","No handler or hook disabled.")
     }
+    /****** INSERTED CODE ENDS *****************/
+
     ret_hooks.erase(hookID);
     drakvuf_resume(drakvuf);
+    //usermode_print(info, params->arguments, params->target);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -444,6 +509,42 @@ std::optional<std::string> apimon::resolve_module(drakvuf_t drakvuf, addr_t proc
     return {};
 }
 
+event_response_t apimon::ki_system_service_handler_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
+{
+    PRINT_DEBUG("[CODEMON] Entered system service handler\n");
+    proc_data_t proc_data = info->attached_proc_data;
+    if (!proc_data.tid)
+    {
+        PRINT_DEBUG("[CODEMON] Failed to get thread id in system service handler!\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    //bool our_fault = this->pf_in_progress.find(std::make_pair(proc_data.pid, proc_data.tid)) != this->pf_in_progress.end();
+    bool our_fault = true; // DIRTY HACK FOR NOW
+    if (!our_fault)
+    {
+        PRINT_DEBUG("[CODEMON] Not suppressing service exception - not our fault\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    // emulate `ret` instruction
+    addr_t saved_rip = drakvuf_get_function_return_address(drakvuf, info);
+    if (!saved_rip)
+    {
+        PRINT_DEBUG("[CODEMON] Error while reading the saved RIP in system service handler\n");
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+    log_message("DEBUG","event_hook","bsod_handler","CHANGED","BSOD cancelled.");
+    page_mode_t pm = drakvuf_get_page_mode(drakvuf);
+    bool is32 = (pm != VMI_PM_IA32E);
+
+    constexpr int EXCEPTION_CONTINUE_EXECUTION = 0;
+    info->regs->rip = saved_rip;
+    info->regs->rsp += (is32 ? 4 : 8);
+    info->regs->rax = EXCEPTION_CONTINUE_EXECUTION;
+    return VMI_EVENT_RESPONSE_SET_REGISTERS;
+}
+
 apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output)
     : pluginex(drakvuf, output)
 {
@@ -452,7 +553,6 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         PRINT_DEBUG("[APIMON] Usermode hooking not supported.\n");
         return;
     }
-
     try
     {
         auto noLog = [](const auto& entry)
@@ -480,28 +580,59 @@ apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output
         .post_cb = on_dll_hooked,
         .extra = (void*)this
     };
+<<<<<<< HEAD
     drakvuf_register_usermode_callback(drakvuf, &reg);
+=======
+
+    drakvuf_register_usermode_callback(drakvuf, &reg);  
+>>>>>>> origin/main
 
     breakpoint_in_system_process_searcher bp;
     register_trap(nullptr, delete_process_cb, bp.for_syscall_name("PspProcessDelete"));
 
     // INSERT NEW STARTUP STUFF HERE
-    std::cout << "Deceptions running and waiting for hooks..." << "\n";
-    //deception_plugin_config agent_config;
+    agent_config.last_update = 0;
 
+<<<<<<< HEAD
     //Move Redis check to here?
+=======
+    simple_user xuser;
+>>>>>>> origin/main
 
-    // agent_config.rtladjustprivilege.active = true;
+    xuser.pstruct_addr = 0x20395271940;
+    xuser.user_name = "Batman";
+    xuser.domain = "LAPTOP-V13TN4M";
+    xuser.logon_server = "LAPTOP-V13TN4M2";
+    xuser.changed = true;
 
-    // if(agent_config.rtladjustprivilege.active) {
-    //     std::cout << "it lives!";
-    // }
+    new_user_list.push_back(xuser);
 
+    this->kiSystemServiceHandlerHook = createSyscallHook("KiSystemServiceHandler", &apimon::ki_system_service_handler_cb);
+    if (!this->kiSystemServiceHandlerHook)
+        throw -1;
+
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_start\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        << ", ";
+        std::cout << "\"message\": "        << "\"Deceptions running and waiting for hooks.\"" ;
+    std::cout << "}" << "\n"; 
+    
     // END NEW STARTUP STUFF
 }
 
 bool apimon::stop_impl()
 {
+    time_t time_now = std::time(nullptr);
+    std::cout << "{";
+        std::cout << "\"timestamp\": "      << std::dec << time_now                 << ", "; 
+        std::cout << "\"type\": "           << "\"system_event\""                   << ", ";
+        std::cout << "\"event\": "          << "\"drakvuf_stop\""                  << ", ";
+        std::cout << "\"action\": "         << "\"SUCCESS\""                        ;
+    std::cout << "}" << "\n";
+     
     return drakvuf_stop_userhooks(drakvuf) && pluginex::stop_impl();
 }
 
